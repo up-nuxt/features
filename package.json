@@ -1,0 +1,51 @@
+{
+  "name": "@up-nuxt/features",
+  "version": "0.1.0",
+  "description": "Feature discovery and organization for Nuxt.",
+  "homepage": "https://github.com/up-nuxt/features#readme",
+  "bugs": {
+    "url": "https://github.com/up-nuxt/features/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/up-nuxt/features.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/module.mjs",
+  "exports": {
+    ".": {
+      "types": "./dist/types.d.mts",
+      "import": "./dist/module.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "dev": "pnpm dev:prepare && nuxt dev playground",
+    "dev:prepare": "nuxt-module-build build --stub && nuxt-module-build prepare && nuxt prepare playground",
+    "prepack": "nuxt-module-build build",
+    "test": "vitest run",
+    "test:types": "tsc --noEmit",
+    "check:playground": "nuxt build playground"
+  },
+  "dependencies": {
+    "@nuxt/kit": "4.6.4"
+  },
+  "devDependencies": {
+    "@nuxt/module-builder": "1.0.4",
+    "@nuxt/schema": "4.6.4",
+    "@types/node": "^24.19.2",
+    "nuxt": "4.6.4",
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  },
+  "engines": {
+    "node": "^24.0.0 || ^26.0.0"
+  },
+  "packageManager": "pnpm@11.17.0"
+}
