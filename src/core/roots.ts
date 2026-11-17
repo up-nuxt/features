@@ -1,6 +1,23 @@
 import { lstat, realpath } from 'node:fs/promises'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { Diagnostic, FeatureRoot, RootDirectories, RootOptions } from './types.js'
+
+/** Resolve aliases even when the final directory does not exist yet. */
+async function canonicalPath(path: string): Promise<string> {
+  const suffix: string[] = []
+  let ancestor = path
+  while (true) {
+    try {
+      return resolve(await realpath(ancestor), ...suffix)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      const parent = dirname(ancestor)
+      if (parent === ancestor) throw error
+      suffix.unshift(basename(ancestor))
+      ancestor = parent
+    }
+  }
+}
 
 export async function resolveRoots(
   dirs: RootDirectories,
@@ -27,26 +44,30 @@ export async function resolveRoots(
     }
     let path = resolve(dirs.rootDir, value)
     try {
-      const stat = await lstat(path)
-      if (!stat.isDirectory()) {
-        diagnostics.push({
-          code: 'INVALID_ROOT',
-          severity: 'error',
-          message: `Root ${kind} must be a directory, not a file or symlink.`,
-          paths: [path],
-        })
-        continue
+      // Reject a symlink at the configured root itself; aliases in ancestors are canonicalized.
+      try {
+        const stat = await lstat(path)
+        if (!stat.isDirectory()) {
+          diagnostics.push({
+            code: 'INVALID_ROOT',
+            severity: 'error',
+            message: `Root ${kind} must be a directory, not a file or symlink.`,
+            paths: [path],
+          })
+          continue
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
-      path = await realpath(path)
+      path = await canonicalPath(path)
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-        diagnostics.push({
-          code: 'IO_ERROR',
-          severity: 'error',
-          message: `Cannot inspect root ${path}: ${String(error)}`,
-          paths: [path],
-        })
-      // Keep missing roots for overlap validation; discovery ignores ENOENT.
+      diagnostics.push({
+        code: 'IO_ERROR',
+        severity: 'error',
+        message: `Cannot inspect root ${path}: ${String(error)}`,
+        paths: [path],
+      })
+      continue
     }
     roots.push({ kind, path })
   }

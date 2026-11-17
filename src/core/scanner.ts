@@ -4,7 +4,7 @@ import { appResources, compare, declarationName, serverResources } from './conve
 import type { Diagnostic, FeatureDeclaration, FeatureRoot, ResourceDirectory } from './types.js'
 
 export async function discoverFeatures(
-  roots: FeatureRoot[],
+  roots: readonly FeatureRoot[],
 ): Promise<{ declarations: FeatureDeclaration[]; diagnostics: Diagnostic[] }> {
   const declarations: FeatureDeclaration[] = []
   const diagnostics: Diagnostic[] = []
@@ -36,7 +36,7 @@ export async function discoverFeatures(
       diagnostics.push({
         code: 'INVALID_DECLARATION',
         severity: 'error',
-        message: `Invalid feature directory ${directory}.`,
+        message: `Invalid feature directory "${directory}". Expected lowercase kebab-case, for example "checkout-flow" or "(checkout-flow)".`,
         paths: [path],
       })
       return
@@ -65,6 +65,7 @@ export async function discoverFeatures(
       id,
       name: parsed.name,
       kind: parsed.kind,
+      origin: 'feature-root',
       parentId,
       source: { root, path, resources },
     })

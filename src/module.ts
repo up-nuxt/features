@@ -9,7 +9,7 @@ const module: NuxtModule<ModuleOptions> = defineNuxtModule<ModuleOptions>({
   meta: { name: '@up-nuxt/features', configKey: 'feature', compatibility: { nuxt: '^4.6.4' } },
   defaults: {},
   async setup(options, nuxt) {
-    const registry = await scanProject(
+    const result = await scanProject(
       {
         rootDir: nuxt.options.rootDir,
         srcDir: nuxt.options.srcDir,
@@ -17,17 +17,19 @@ const module: NuxtModule<ModuleOptions> = defineNuxtModule<ModuleOptions>({
       },
       options.roots,
     )
-    if (registry.diagnostics.length)
+    if (!result.success)
       throw new Error(
-        registry.diagnostics
+        result.diagnostics
           .map(
             (diagnostic) =>
               `[${diagnostic.code}] ${diagnostic.message} ${diagnostic.paths.join(', ')}`,
           )
           .join('\n'),
       )
+    for (const diagnostic of result.diagnostics)
+      console.warn(`[${diagnostic.code}] ${diagnostic.message}`)
     // Discovery only: resolvers and runtime manifests will consume this registry in Milestone 2.
-    console.info(`@up-nuxt/features: discovered ${registry.features.length} features`)
+    console.info(`@up-nuxt/features: discovered ${result.registry.features.length} features`)
   },
 })
 

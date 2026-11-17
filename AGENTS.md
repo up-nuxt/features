@@ -5,7 +5,11 @@ This is the independent `up-nuxt/features` repository, published as `@up-nuxt/fe
 - Read `docs/architecture.md` before changing discovery, identities, root resolution, or registry merging.
 - Keep `src/core` independent of Nuxt, Nitro, Vue, and OpenFeature. Integrations consume its registry.
 - Preserve the application/server boundary on every resource source record.
-- Treat ambiguous declarations as structured errors; preserve deterministic output.
+- Treat ambiguous declarations as structured errors; publish a registry only on explicit build success. Warnings may accompany success.
+- Keep structural parent relationships separate from resource membership and future flag bindings.
+- Preserve snapshot immutability at type and runtime levels; copy known records without sharing scanner input objects.
+- Apply lowercase kebab-case to module-defined names, preserving native Nuxt group identities without that restriction.
+- Source order is presentation only; integrations must never infer precedence from it.
 - Follow directory symlinks only after an explicit design change and traversal safety tests.
 - Discuss changes to public configuration and identity conventions before implementing them.
 - Keep work within the requested milestone. Milestone 1 discovers resources only.

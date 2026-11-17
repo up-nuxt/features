@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildRegistry, discoverFeatures, resolveRoots, scanProject } from '../src/core/index.js'
-import type { RootDirectories } from '../src/core/types.js'
+import type { RegistryBuildResult, RootDirectories, RootOptions } from '../src/core/types.js'
 
 let project: string
 let dirs: RootDirectories
@@ -17,7 +17,14 @@ afterEach(async () => {
 const directory = async (path: string) => {
   await mkdir(join(project, path), { recursive: true })
 }
-const scan = () => scanProject(dirs)
+// Test convenience only: production failures have no registry property.
+const inspect = (result: RegistryBuildResult) => ({
+  features: result.success ? result.registry.features : [],
+  diagnostics: result.diagnostics,
+})
+const scanWith = async (directories: RootDirectories, options?: RootOptions) =>
+  inspect(await scanProject(directories, options))
+const scan = () => scanWith(dirs)
 
 describe('discovery and registry', () => {
   it('merges three roots while preserving resource boundaries', async () => {
@@ -95,9 +102,9 @@ describe('discovery and registry', () => {
   it('reports feature/group conflict in one root', async () => {
     await directory('features/shop/features/checkout')
     await directory('features/shop/(checkout)')
-    expect((await scan()).diagnostics).toEqual([
+    expect((await scan()).diagnostics).toContainEqual(
       expect.objectContaining({ code: 'INCOMPATIBLE_DECLARATION', featureId: 'shop/checkout' }),
-    ])
+    )
   })
   it('reports incompatible declarations across roots', async () => {
     await directory('features/shop/(checkout)')
@@ -116,9 +123,9 @@ describe('discovery and registry', () => {
     await directory('features/shop')
     const { roots } = await resolveRoots(dirs)
     const { declarations } = await discoverFeatures(roots)
-    const result = buildRegistry([...declarations, ...declarations])
+    const result = inspect(buildRegistry([...declarations, ...declarations]))
     expect(result.diagnostics[0]!.code).toBe('DUPLICATE_DECLARATION')
-    expect(result.features[0]!.sources).toHaveLength(1)
+    expect(result.features).toEqual([])
   })
   it('is deterministic regardless of input order', async () => {
     for (const path of [
@@ -141,7 +148,9 @@ describe('discovery and registry', () => {
     await directory('features/.hidden/(fake)')
     const result = await scan()
     expect(result.diagnostics[0]!.code).toBe('INVALID_DECLARATION')
-    expect(result.features.map((f) => f.id)).toEqual(['shop'])
+    expect(result.features).toEqual([])
+    const physical = await discoverFeatures((await resolveRoots(dirs)).roots)
+    expect(physical.declarations.map((item) => item.id)).toEqual(['shop'])
   })
 })
 
@@ -151,14 +160,14 @@ describe('roots and traversal safety', () => {
   })
   it('resolves custom roots relative to rootDir and supports disabling roots', async () => {
     await directory('custom/shop')
-    const result = await scanProject(dirs, { general: 'custom', app: false, server: false })
+    const result = await scanWith(dirs, { general: 'custom', app: false, server: false })
     expect(result.features[0]!.sources[0]!.root.path).toBe(await realpath(join(project, 'custom')))
     expect(result.diagnostics).toEqual([])
   })
   it('uses resolved srcDir and serverDir', async () => {
     await directory('client/features/shop')
     await directory('backend/features/shop/api')
-    const result = await scanProject({
+    const result = await scanWith({
       ...dirs,
       srcDir: join(project, 'client'),
       serverDir: join(project, 'backend'),
@@ -167,20 +176,20 @@ describe('roots and traversal safety', () => {
   })
   it('rejects equal and nested roots even when missing', async () => {
     for (const app of ['features', 'features/nested']) {
-      const result = await scanProject(dirs, { app })
+      const result = await scanWith(dirs, { app })
       expect(result.diagnostics[0]!.code).toBe('OVERLAPPING_ROOTS')
       expect(result.features).toEqual([])
     }
   })
   it('does not mistake sibling prefixes for overlap', async () => {
     expect(
-      (await scanProject(dirs, { general: 'features', app: 'features-extra' })).diagnostics,
+      (await scanWith(dirs, { general: 'features', app: 'features-extra' })).diagnostics,
     ).toEqual([])
   })
   it('rejects files and empty roots', async () => {
     await writeFile(join(project, 'file'), '')
     expect(
-      (await scanProject(dirs, { general: 'file', app: '' })).diagnostics.map((d) => d.code),
+      (await scanWith(dirs, { general: 'file', app: '' })).diagnostics.map((d) => d.code),
     ).toEqual(['INVALID_ROOT', 'INVALID_ROOT'])
   })
   it('ignores feature, resource, and cyclic directory symlinks', async () => {
@@ -197,14 +206,12 @@ describe('roots and traversal safety', () => {
   it('detects overlapping roots through symlinked ancestors', async () => {
     await directory('features/shop')
     await symlink(project, join(project, 'alias'), 'dir')
-    const result = await scanProject(dirs, { app: 'alias/features' })
+    const result = await scanWith(dirs, { app: 'alias/features' })
     expect(result.diagnostics[0]!.code).toBe('OVERLAPPING_ROOTS')
   })
   it('rejects symlink roots', async () => {
     await directory('outside')
     await symlink(join(project, 'outside'), join(project, 'linked'), 'dir')
-    expect((await scanProject(dirs, { general: 'linked' })).diagnostics[0]!.code).toBe(
-      'INVALID_ROOT',
-    )
+    expect((await scanWith(dirs, { general: 'linked' })).diagnostics[0]!.code).toBe('INVALID_ROOT')
   })
 })
