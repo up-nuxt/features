@@ -42,6 +42,29 @@ function copySource(source: FeatureSource): FeatureSource {
   })
 }
 
+const nativePagesPrefix = '@pages/'
+const featurePagesPrefix = '@pages:feature/'
+
+function nativeIdentity(id: string) {
+  if (id.startsWith(nativePagesPrefix))
+    return { path: id.slice(nativePagesPrefix.length), owner: undefined }
+  if (!id.startsWith(featurePagesPrefix)) return
+  const rest = id.slice(featurePagesPrefix.length)
+  const separator = rest.indexOf('/')
+  if (separator < 1) return
+  const rawOwner = rest.slice(0, separator)
+  try {
+    const owner = decodeURIComponent(rawOwner)
+    if (
+      encodeURIComponent(owner) === rawOwner &&
+      owner.split('/').every((name) => featureName.test(name))
+    )
+      return { path: rest.slice(separator + 1), owner }
+  } catch {
+    return
+  }
+}
+
 function validIdentity(item: FeatureDeclaration): boolean {
   if (item.kind !== 'feature' && item.kind !== 'group') return false
   if (item.origin === 'feature-root') {
@@ -49,9 +72,10 @@ function validIdentity(item: FeatureDeclaration): boolean {
     return segments.every((segment) => featureName.test(segment)) && item.name === segments.at(-1)
   }
   // Reserve the native namespace without imposing feature naming rules on Nuxt groups.
-  if (item.origin !== 'native-pages' || item.kind !== 'group' || !item.id.startsWith('@pages/'))
-    return false
-  const segments = item.id.slice('@pages/'.length).split('/')
+  if (item.origin !== 'native-pages' || item.kind !== 'group') return false
+  const identity = nativeIdentity(item.id)
+  if (!identity) return false
+  const segments = identity.path.split('/')
   const last = segments.at(-1) ?? ''
   return (
     segments.every(
@@ -85,7 +109,7 @@ function belongsToRoot(item: FeatureDeclaration): boolean {
       return (
         item.origin === 'native-pages' &&
         root.kind === 'app' &&
-        fromRoot.split(sep).join('/') === item.id.slice('@pages/'.length)
+        fromRoot.split(sep).join('/') === nativeIdentity(item.id)?.path
       )
   }
 }
@@ -122,7 +146,7 @@ export function buildRegistry(
     if (!validIdentity(item))
       report(
         'INVALID_ID',
-        `Invalid identity or name for ${item.id}. Module names must use lowercase kebab-case; native groups use the @pages/ namespace.`,
+        `Invalid identity or name for ${item.id}. Module names must use lowercase kebab-case; native groups use a reserved @pages namespace.`,
         [item],
       )
     const source = item.source
@@ -215,6 +239,30 @@ export function buildRegistry(
           duplicates,
         )
     for (const item of items) {
+      const qualified = item.origin === 'native-pages' && nativeIdentity(id)
+      if (qualified && qualified.owner) {
+        const owner = groups.get(qualified.owner)
+        if (
+          !owner?.some(
+            (declaration) =>
+              declaration.origin === 'feature-root' &&
+              declaration.source.scopes.some(
+                (scope) =>
+                  scope.kind === 'app' &&
+                  scope.resources.some(
+                    (resource) =>
+                      resource.name === 'pages' &&
+                      relative(resource.path, item.source.root.path) === '',
+                  ),
+              ),
+          )
+        )
+          report(
+            'INVALID_SOURCE_OWNERSHIP',
+            `Native group ${id} has no matching App Pages resource on ${qualified.owner}.`,
+            [item],
+          )
+      }
       if (item.parentId !== undefined && !groups.has(item.parentId))
         report(
           'MISSING_PARENT',

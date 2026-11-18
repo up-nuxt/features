@@ -2,7 +2,7 @@
 
 Feature organization for Nuxt. Repository: [up-nuxt/features](https://github.com/up-nuxt/features).
 
-The module supports explicit application/server resource scopes, Nuxt component auto-imports, and opt-in feature composable imports. Pages registration, Nitro registration, and OpenFeature are future work.
+The module supports explicit application/server resource scopes, Nuxt component auto-imports, opt-in feature composable imports, and opt-in Feature Pages. Nitro registration and OpenFeature are future work.
 
 ## Directory conventions
 
@@ -79,6 +79,21 @@ export default defineNuxtConfig({
 ```
 
 For example, export `useCart` from `app/features/shop/composables/useCart.ts` or `features/shop/app/composables/useCart.ts`. Nuxt uses the exported name for named exports and the filename for default exports. Use an index barrel to expose nested files. Apps, Groups, and nested Features use the same naming rules. Feature imports have no automatic prefix, and ambiguous names produce a diagnostic. See the [architecture](docs/architecture.md#composable-auto-imports) for priority, symlink, and development refresh behavior.
+
+## Pages
+
+Enable App-scope Pages with `feature.pages.enabled: true`. Nuxt's explicit routing disablement still applies.
+
+```ts
+export default defineNuxtConfig({
+  modules: ['@up-nuxt/features'],
+  feature: { pages: { enabled: true } },
+})
+```
+
+Place Pages in `app/features/shop/pages/` or `features/shop/app/pages/`. Nested declarations and structural Groups follow the same App-scope rule. For example, `features/shop/(checkout)/app/pages/orders/[id].vue` generates `/orders/:id()` with the default name `orders-id`. Add a directory within `pages/` to introduce a URL segment. Page names, parent and default child routes, layouts and `definePageMeta` follow Nuxt.
+
+A structural Group such as `features/(dashboard)` contributes ownership. A directory such as `app/pages/(dashboard)` or `features/shop/app/pages/(dashboard)` contributes a distinct native Route Group. Feature routes with ambiguous names, paths or static aliases fail with a diagnostic. Restart Nuxt when adding, renaming or removing Pages or Groups to guarantee topology updates. See the [architecture](docs/architecture.md#pages-and-native-route-groups) for metadata, development recovery and filesystem limits.
 
 ## Development
 

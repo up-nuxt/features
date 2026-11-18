@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 import { buildRegistry } from '../src/core/registry.js'
 import type {
@@ -374,4 +376,37 @@ it('validates native page-group ownership against the relative page hierarchy', 
     ],
     'INVALID_SOURCE_OWNERSHIP',
   )
+})
+
+it('validates owner-qualified native groups against the owner’s exact App Pages root', () => {
+  const owner = declaration('dashboard')
+  const appScope = owner.source.scopes.find((scope) => scope.kind === 'app')!
+  const pages = join(appScope.path, 'pages')
+  const withPages: FeatureDeclaration = {
+    ...owner,
+    source: {
+      ...owner.source,
+      scopes: owner.source.scopes.map((scope) =>
+        scope === appScope
+          ? { ...scope, resources: [...scope.resources, { name: 'pages', path: pages }] }
+          : scope,
+      ),
+    },
+  }
+  const group = native('@pages/(portal)')
+  const id = '@pages:feature/dashboard/(portal)'
+  const qualified: FeatureDeclaration = {
+    ...group,
+    id,
+    source: {
+      ...group.source,
+      featureId: id,
+      path: join(pages, '(portal)'),
+      root: { ...group.source.root, path: pages },
+    },
+  }
+  const result = registry(buildRegistry([group, qualified, withPages]))
+  expect(result.features.find((item) => item.id === id)?.parentId).toBeUndefined()
+  failure([owner, qualified], 'INVALID_SOURCE_OWNERSHIP')
+  failure([qualified], 'INVALID_SOURCE_OWNERSHIP')
 })

@@ -1,18 +1,18 @@
 import { lstat, readdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, sep } from 'node:path'
 
 export function symlinkError(
   path: string,
-  resource: 'component' | 'composable' = 'component',
+  resource: 'component' | 'composable' | 'page' = 'component',
 ): Error {
   return new Error(
     `[FEATURE_${resource.toUpperCase()}_SYMLINK] Refusing to scan or register a symlink in a feature ${resource} directory: ${path}. Remove the link or copy the intended application files into the directory. No symlink targets are allowed, including file links and internal links.`,
   )
 }
-/** Safety inspection only: no component filename parsing or registration. Never follows links. */
+/** Safety inspection only. Never follows links. */
 export async function assertSafeResourceTree(
   directory: string,
-  resource: 'component' | 'composable',
+  resource: 'component' | 'composable' | 'page',
 ): Promise<void> {
   const pending = [directory]
   while (pending.length) {
@@ -24,4 +24,10 @@ export async function assertSafeResourceTree(
       if (entry.isDirectory()) pending.push(path)
     }
   }
+}
+
+/** Filesystem containment on path segments, including cross-volume paths on Windows. */
+export function containsPath(root: string, file: string): boolean {
+  const path = relative(root, file)
+  return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`))
 }
