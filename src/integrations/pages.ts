@@ -3,7 +3,7 @@ import { lstat, realpath } from 'node:fs/promises'
 import { extendPages, getLayerDirectories, resolveFiles, useLogger } from '@nuxt/kit'
 import type { Nuxt } from '@nuxt/schema'
 import type { FeatureRegistry } from '../core/types.js'
-import { loadNuxtRouting, parseFeaturePages } from './nuxt-routing.js'
+import { loadNuxtRouting, mountFeaturePages, parseFeaturePages } from './nuxt-routing.js'
 import { validatePageCollisions } from './page-collisions.js'
 import {
   buildRouteMembership,
@@ -24,6 +24,7 @@ export async function registerFeaturePages(
   registry: FeatureRegistry,
   options: PagesOptions,
   nuxt: Nuxt,
+  prefixFor: (ownerId: string) => readonly string[],
 ) {
   const pagesOption = nuxt.options.pages
   if (pagesOption === false || (typeof pagesOption === 'object' && pagesOption.enabled === false))
@@ -39,6 +40,7 @@ export async function registerFeaturePages(
                 .map((resource) => ({
                   directory: resource.path,
                   owner: entry,
+                  segments: prefixFor(entry.id),
                   source,
                 }))
             : [],
@@ -148,7 +150,7 @@ export async function registerFeaturePages(
     setRouteMembership(nuxt)
     const additions = []
     const origins = new Map<string, PageOrigin>()
-    for (const { directory, owner, source } of featureRoots) {
+    for (const { directory, owner, source, segments } of featureRoots) {
       if (relative(directory, await realpath(directory))) throw symlinkError(directory, 'page')
       await assertSafeResourceTree(directory, 'page')
       const files = await resolveFiles(directory, pattern, { followSymbolicLinks: false })
@@ -165,15 +167,14 @@ export async function registerFeaturePages(
           layer: source.root.layer,
         })
       }
-      additions.push(
-        ...parseFeaturePages(
-          await getParser(),
-          slash(directory),
-          files.map(slash),
-          modes,
-          (message) => logger.warn(message),
-        ),
+      const routes = parseFeaturePages(
+        await getParser(),
+        slash(directory),
+        files.map(slash),
+        modes,
+        (message) => logger.warn(message),
       )
+      additions.push(...mountFeaturePages(routes, segments))
     }
     // Publish provenance only after all roots have passed preflight.
     featureFiles = origins

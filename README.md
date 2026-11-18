@@ -91,7 +91,30 @@ export default defineNuxtConfig({
 })
 ```
 
-Place Pages in `app/features/shop/pages/` or `features/shop/app/pages/`. Nested declarations and structural Groups follow the same App-scope rule. For example, `features/shop/(checkout)/app/pages/orders/[id].vue` generates `/orders/:id()` with the default name `orders-id`. Add a directory within `pages/` to introduce a URL segment. Page names, parent and default child routes, layouts and `definePageMeta` follow Nuxt.
+Place Pages in `app/features/shop/pages/` or `features/shop/app/pages/`. Nested declarations and structural Groups follow the same App-scope rule. By default, Features contribute URL and route-name segments in ancestry order. For example, `features/shop/(checkout)/app/pages/orders/[id].vue` generates `/shop/orders/:id()` with the name `shop-orders-id`. The structural Group `checkout` is transparent by default. Each Pages directory keeps its own route tree.
+
+**Migration from 2.3:** Set `feature.routing.prefix: 'none'` to restore the previous unprefixed Feature URLs and names, with `groupPrefix` left at its default and no overrides.
+
+```ts
+export default defineNuxtConfig({
+  modules: ['@up-nuxt/features'],
+  feature: {
+    pages: { enabled: true },
+    routing: {
+      prefix: 'feature',
+      groupPrefix: false,
+      overrides: {
+        features: { auth: 'none' },
+        groups: { 'shop/admin': true },
+      },
+    },
+  },
+})
+```
+
+An override applies to the named declaration's segment. Descendants keep their own settings. Use logical Registry IDs with the appropriate feature or group kind. TypeScript checks values and option shape. Declaration IDs are validated at setup against the filesystem Registry.
+
+Nuxt applies explicit `definePageMeta` paths, names and aliases with its usual precedence. An absolute path or alias can opt out of the mount. Relative child paths and aliases resolve within their effective router parent.
 
 A structural Group such as `features/(dashboard)` contributes ownership. A directory such as `app/pages/(dashboard)` or `features/shop/app/pages/(dashboard)` contributes a distinct native Route Group. Feature routes with ambiguous names, paths or static aliases fail with a diagnostic. Restart Nuxt when adding, renaming or removing Pages or Groups to guarantee topology updates. See the [architecture](docs/architecture.md#pages-and-native-route-groups) for metadata, development recovery and filesystem limits.
 

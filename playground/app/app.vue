@@ -24,10 +24,10 @@ const showcase = useShowcaseSummary()
       <li>{{ showcase }}</li>
     </ul>
     <nav aria-label="Example routes">
-      <NuxtLink to="/">Home</NuxtLink>
-      <NuxtLink to="/products/42">Product 42</NuxtLink>
-      <NuxtLink to="/inventory">Inventory</NuxtLink>
-      <NuxtLink to="/checkout">Checkout</NuxtLink>
+      <NuxtLink to="/shop">Home</NuxtLink>
+      <NuxtLink to="/shop/products/42">Product 42</NuxtLink>
+      <NuxtLink to="/shop/inventory/inventory">Inventory</NuxtLink>
+      <NuxtLink to="/shop/checkout">Checkout</NuxtLink>
       <NuxtLink to="/showcase">Showcase</NuxtLink>
       <NuxtLink to="/help">Help</NuxtLink>
     </nav>

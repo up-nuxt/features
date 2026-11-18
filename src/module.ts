@@ -1,17 +1,21 @@
 import type { NuxtModule } from '@nuxt/schema'
 import { defineNuxtModule, useLogger } from '@nuxt/kit'
 import { scanProject } from './core/index.js'
+import { createRoutingPolicy, type RoutingOptions } from './core/routing.js'
 import { registerFeatureComponents } from './integrations/components.js'
 import type { ComponentsOptions } from './integrations/components.js'
 import { registerFeatureComposables } from './integrations/composables.js'
 import type { ComposablesOptions } from './integrations/composables.js'
 import { registerFeaturePages, type PagesOptions } from './integrations/pages.js'
 import type { RootOptions } from './core/types.js'
+export type { FeaturePrefix, RoutingOptions } from './core/routing.js'
+
 export interface ModuleOptions {
   roots?: RootOptions
   components?: ComponentsOptions
   composables?: ComposablesOptions
   pages?: PagesOptions
+  routing?: RoutingOptions
 }
 const module: NuxtModule<ModuleOptions> = defineNuxtModule<ModuleOptions>({
   meta: { name: '@up-nuxt/features', configKey: 'feature', compatibility: { nuxt: '^4.6.4' } },
@@ -38,12 +42,13 @@ const module: NuxtModule<ModuleOptions> = defineNuxtModule<ModuleOptions>({
           )
           .join('\n'),
       )
+    const prefixFor = createRoutingPolicy(result.registry, options.routing)
     const logger = useLogger('@up-nuxt/features')
     for (const diagnostic of result.diagnostics)
       logger.warn(`[${diagnostic.code}] ${diagnostic.message}`)
     await registerFeatureComponents(result.registry, options.components ?? {}, nuxt)
     await registerFeatureComposables(result.registry, options.composables ?? {}, nuxt)
-    await registerFeaturePages(result.registry, options.pages ?? {}, nuxt)
+    await registerFeaturePages(result.registry, options.pages ?? {}, nuxt, prefixFor)
     logger.debug(`Discovered ${result.registry.features.length} features`)
   },
 })

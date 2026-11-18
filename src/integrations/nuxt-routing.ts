@@ -42,3 +42,25 @@ export function parseFeaturePages(
     throw new Error(`[FEATURE_PAGE_PARSE] ${root}: ${String(cause)}`, { cause })
   }
 }
+
+/** Mount generated routes before Nuxt merges definePageMeta. Child paths stay relative. */
+export function mountFeaturePages(routes: NuxtPage[], segments: readonly string[]): NuxtPage[] {
+  if (!segments.length) return routes
+  const pathPrefix = '/' + segments.join('/')
+  const namePrefix = segments.join('-')
+
+  function mount(pages: NuxtPage[], root: boolean) {
+    for (const page of pages) {
+      if (page.name)
+        page.name =
+          root && page.path === '/' && page.name === 'index'
+            ? namePrefix
+            : `${namePrefix}-${page.name}`
+      if (root) page.path = page.path === '/' ? pathPrefix : pathPrefix + page.path
+      if (page.children) mount(page.children, false)
+    }
+  }
+
+  mount(routes, true)
+  return routes
+}

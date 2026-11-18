@@ -43,6 +43,7 @@ async function fixture(
   files: Record<string, string>,
   run: (root: string) => Promise<void>,
   config = '',
+  legacyRouting = true,
 ) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-pages-')))
   try {
@@ -53,10 +54,15 @@ async function fixture(
     }
     await writeFile(
       join(root, 'nuxt.config.ts'),
-      `export default defineNuxtConfig({
+      `const options = {
         modules: [${JSON.stringify(join(project, 'src/module.ts'))}],
         srcDir: 'app', buildDir: '.nuxt', devtools: false, compatibilityDate: '2026-11-17',
         ${config}
+      }
+      export default defineNuxtConfig(${
+        legacyRouting
+          ? "{ ...options, feature: { routing: { prefix: 'none' }, ...options.feature } }"
+          : 'options'
       })`,
     )
     await run(root)
@@ -84,10 +90,10 @@ async function buildWithMembership(nuxt: Nuxt) {
   return snapshot
 }
 
-it(
-  'emits equivalent Nuxt page trees for native and Feature-only applications',
+it.each([true, false])(
+  'emits equivalent Nuxt page trees for native and Feature-only applications (legacy URLs: %s)',
   { timeout },
-  async () => {
+  async (legacyRouting) => {
     const files = {
       'index.vue': page,
       'help.vue': page,
@@ -105,6 +111,7 @@ it(
         '<script setup>definePageMeta({ name: "deals", alias: "/deals", layout: "store" })</script>' +
         page,
     }
+    const mount = legacyRouting ? '' : '/shop'
     async function scan(prefix: string, enabled: boolean) {
       let tree: unknown
       await fixture(
@@ -134,7 +141,7 @@ it(
               await readFile(join(nuxt.options.buildDir, 'types/typed-router.d.ts'), 'utf8'),
             ).toContain('deals')
             const product = snapshot?.routes.find(
-              (route) => route.path === '/products/:id()' && route.sources.length === 2,
+              (route) => route.path === mount + '/products/:id()' && route.sources.length === 2,
             )
             expect(product?.sources.map((source) => source.view)).toEqual(['aside', 'default'])
             expect(
@@ -144,10 +151,13 @@ it(
             ).toBe(true)
           }),
         `feature: { pages: { enabled: ${enabled} } }, experimental: { componentIslands: true, typedPages: true },`,
+        legacyRouting,
       )
       return tree
     }
-    expect(await scan('features/shop/app/pages/', true)).toEqual(await scan('app/pages/', false))
+    expect(await scan('features/shop/app/pages/', true)).toEqual(
+      await scan(legacyRouting ? 'app/pages/' : 'app/pages/shop/', false),
+    )
   },
 )
 
@@ -246,6 +256,27 @@ it(
   },
 )
 
+async function expectPageCollision(root: string, identity: string, a: string, b: string) {
+  const child = spawn(process.execPath, [
+    join(project, 'node_modules/nuxt/bin/nuxt.mjs'),
+    'build',
+    root,
+  ])
+  let logs = ''
+  child.stdout.on('data', (chunk) => {
+    logs += chunk
+  })
+  child.stderr.on('data', (chunk) => {
+    logs += chunk
+  })
+  const [code] = await once(child, 'close')
+  expect(code).not.toBe(0)
+  expect(logs).toContain('FEATURE_PAGE_COLLISION')
+  expect(logs).toContain(identity)
+  expect(logs).toContain(a)
+  expect(logs).toContain(b)
+}
+
 it.each([
   ['features/cart/app/pages/index.vue', 'app/features/cart/pages/index.vue', '/', page],
   ['features/cart/app/pages/index.vue', 'app/pages/index.vue', '/', page],
@@ -273,26 +304,7 @@ it.each([
 ])('rejects ambiguous records between %s and %s', { timeout }, async (a, b, identity, content) => {
   await fixture(
     { [a]: content, [b]: page },
-    async (root) => {
-      const child = spawn(process.execPath, [
-        join(project, 'node_modules/nuxt/bin/nuxt.mjs'),
-        'build',
-        root,
-      ])
-      let logs = ''
-      child.stdout.on('data', (chunk) => {
-        logs += chunk
-      })
-      child.stderr.on('data', (chunk) => {
-        logs += chunk
-      })
-      const [code] = await once(child, 'close')
-      expect(code).not.toBe(0)
-      expect(logs).toContain('FEATURE_PAGE_COLLISION')
-      expect(logs).toContain(identity)
-      expect(logs).toContain(a)
-      expect(logs).toContain(b)
-    },
+    (root) => expectPageCollision(root, identity, a, b),
     'feature: { pages: { enabled: true } },',
   )
 })
@@ -373,6 +385,22 @@ it(
       {
         'app/app.vue': '<template><NuxtLayout><NuxtPage /></NuxtLayout></template>',
         'app/layouts/store.vue': '<template><main><h1>STORE_LAYOUT</h1><slot /></main></template>',
+        'features/shop/app/pages/catalog.vue':
+          '<template><section><NuxtPage /></section></template>',
+        'features/shop/app/pages/catalog/index.vue': '<template><p>CATALOG_INDEX</p></template>',
+        'features/shop/app/pages/catalog/item.vue':
+          '<script setup>definePageMeta({ path: "renamed", alias: "alternate" })</script><template><p>CATALOG_ITEM</p></template>',
+        'features/shop/app/pages/catalog/outside.vue':
+          '<script setup>definePageMeta({ path: "/absolute", name: "absolute" })</script><template><p>ABSOLUTE_CHILD</p></template>',
+        'app/lib/runtime-route.ts':
+          'export const routePath = "/runtime", routeName = "runtime-explicit", routeAlias = "/dynamic-alias"',
+        'features/shop/app/pages/runtime.vue': `
+          <script setup lang="ts">
+          import { routePath, routeName, routeAlias } from '~/lib/runtime-route'
+          definePageMeta({ path: routePath, name: routeName, alias: routeAlias })
+          const route = useRoute()
+          </script>
+          <template><p>RUNTIME_NAME {{ route.name }}</p></template>`,
         'features/shop/app/pages/(offers)/products/[id].vue': `
       <script setup lang="ts">
       definePageMeta({ layout: 'store', name: 'product', alias: '/sku/:id()' })
@@ -399,15 +427,43 @@ it(
             }, server.logs)
             expect(html).toContain('STORE_LAYOUT')
             expect(html).toContain('PRODUCT 42')
-            expect(snapshot?.routes[0]).toMatchObject({
+            expect(snapshot?.routes.find((route) => route.name === 'product')).toMatchObject({
               name: 'product',
-              path: '/products/:id()',
+              path: '/shop/products/:id()',
             })
+            const typed = await readFile(
+              join(nuxt.options.buildDir, 'types/typed-router.d.ts'),
+              'utf8',
+            )
+            const routes = nuxt.vfs[join(nuxt.options.buildDir, 'routes.mjs')]
+            expect(typed).toContain('/shop/products/:id()')
+            expect(typed).toContain('shop-catalog-item')
+            expect(typed).toContain('/shop/catalog/renamed')
+            expect(typed).toContain('/absolute')
+            expect(typed).toContain('shop-runtime')
+            expect(routes).toContain('/shop/products/:id()')
+            expect(routes).toContain('path: "renamed"')
+            expect(routes).toContain('?.path ?? "/shop/runtime"')
+            for (const [path, marker] of Object.entries({
+              '/shop/products/42': 'PRODUCT 42',
+              '/shop/catalog': 'CATALOG_INDEX',
+              '/shop/catalog/renamed': 'CATALOG_ITEM',
+              '/shop/catalog/alternate': 'CATALOG_ITEM',
+              '/absolute': 'ABSOLUTE_CHILD',
+              '/runtime': 'RUNTIME_NAME runtime-explicit',
+              '/dynamic-alias': 'RUNTIME_NAME runtime-explicit',
+            })) {
+              const response = await fetch(`http://127.0.0.1:${port}${path}`)
+              expect(response.status, path).toBe(200)
+              expect(await response.text()).toContain(marker)
+            }
+            expect((await fetch(`http://127.0.0.1:${port}/products/42`)).status).toBe(404)
           } finally {
             await server.close()
           }
         }),
-      'feature: { pages: { enabled: true } },',
+      'feature: { pages: { enabled: true } }, experimental: { typedPages: true },',
+      false,
     )
   },
 )
@@ -439,15 +495,15 @@ it(
             return response?.status === 200 && (await response.text()).includes(value)
           }, server.logs)
         try {
-          await rendered('/item', 'VALID_FEATURE_PAGE')
+          await rendered('/shop/item', 'VALID_FEATURE_PAGE')
           await writeFile(join(root, source), '<template><p>EDITED_FEATURE_PAGE</p></template>')
-          await rendered('/item', 'EDITED_FEATURE_PAGE')
+          await rendered('/shop/item', 'EDITED_FEATURE_PAGE')
           await writeFile(
             join(root, source),
             '<script setup>definePageMeta({ path: "/changed" })</script><template><p>EDITED_FEATURE_PAGE</p></template>',
           )
           await rendered('/changed', 'EDITED_FEATURE_PAGE')
-          expect((await request('/item')).status).toBe(404)
+          expect((await request('/shop/item')).status).toBe(404)
           const before = await request(moduleUrl)
           expect(before.status).toBe(200)
           expect(await before.text()).toContain('EDITED_FEATURE_PAGE')
@@ -474,7 +530,7 @@ it(
           await rm(join(root, source))
           await writeFile(join(root, source), '<template><p>RECOVERED_FEATURE_PAGE</p></template>')
           server = start()
-          await rendered('/item', 'RECOVERED_FEATURE_PAGE')
+          await rendered('/shop/item', 'RECOVERED_FEATURE_PAGE')
 
           await server.close()
           await rename(join(root, source), join(root, 'app/features/shop/pages/renamed.vue'))
@@ -482,20 +538,21 @@ it(
           await mkdir(newGroup, { recursive: true })
           await writeFile(join(newGroup, 'new.vue'), '<template><p>NEW_GROUP_PAGE</p></template>')
           server = start()
-          await rendered('/renamed', 'RECOVERED_FEATURE_PAGE')
-          await rendered('/new', 'NEW_GROUP_PAGE')
-          expect((await request('/item')).status).toBe(404)
+          await rendered('/shop/renamed', 'RECOVERED_FEATURE_PAGE')
+          await rendered('/shop/new', 'NEW_GROUP_PAGE')
+          expect((await request('/shop/item')).status).toBe(404)
 
           await server.close()
           await rm(newGroup, { recursive: true })
           server = start()
-          await rendered('/renamed', 'RECOVERED_FEATURE_PAGE')
-          expect((await request('/new')).status).toBe(404)
+          await rendered('/shop/renamed', 'RECOVERED_FEATURE_PAGE')
+          expect((await request('/shop/new')).status).toBe(404)
         } finally {
           await server.close()
         }
       },
       'feature: { pages: { enabled: true } },',
+      false,
     )
   },
 )
@@ -528,11 +585,13 @@ it(
             origin: { kind: 'layer' },
             nativeGroups: [{ id: '@pages/(catalog)' }],
           })
+          expect(snapshot.routes.some((route) => route.path === '/shop/stock/:id()')).toBe(true)
           expect(
             snapshot.registry.features.find((item) => item.id === '@pages/(catalog)')?.sources,
           ).toHaveLength(2)
         }),
       'feature: { pages: { enabled: true } },',
+      false,
     )
   },
 )
@@ -715,3 +774,157 @@ it.each(['app/pages/about.vue', 'app/lib/shared.vue'])(
     )
   },
 )
+
+it(
+  'mounts independently parsed pages under their actual Feature ancestors by default',
+  { timeout },
+  async () => {
+    await fixture(
+      {
+        'features/shop/app/pages/index.vue': page,
+        'app/features/shop/pages/(admin)/users.vue': page,
+        'features/shop/(admin)/app/pages/(private)/team.vue': page,
+        'features/shop/(admin)/features/inventory/app/pages/stock.vue': page,
+        'features/(admin)/app/pages/users.vue': page,
+        'features/catalog/app/pages/index.vue': page,
+        'app/pages/(admin)/about.vue': page,
+      },
+      (root) =>
+        withNuxt(root, async (nuxt) => {
+          const snapshot = (await buildWithMembership(nuxt))!
+          const named = Object.fromEntries(snapshot.routes.map((route) => [route.path, route.name]))
+          expect(named).toEqual({
+            '/shop': 'shop',
+            '/shop/users': 'shop-users',
+            '/shop/team': 'shop-team',
+            '/shop/inventory/stock': 'shop-inventory-stock',
+            '/users': 'users',
+            '/catalog': 'catalog',
+            '/about': 'about',
+          })
+          expect(snapshot.routes.every((route) => route.parentId === undefined)).toBe(true)
+          expect(
+            snapshot.routes.find((route) => route.path === '/shop/users')?.sources[0]
+              ?.nativeGroups[0]?.id,
+          ).toBe('@pages:feature/shop/(admin)')
+          expect(
+            snapshot.routes.find((route) => route.path === '/about')?.sources[0]?.nativeGroups[0]
+              ?.id,
+          ).toBe('@pages/(admin)')
+          expect(
+            nuxt.apps.default?.pages?.find((route) => route.path === '/shop/team')?.meta?.groups,
+          ).toEqual(['private'])
+        }),
+      'feature: { pages: { enabled: true } },',
+      false,
+    )
+  },
+)
+
+it.each([
+  [
+    '{ groupPrefix: true, overrides: { features: { shop: "none" }, groups: { "shop/admin/private": false } } }',
+    ['/portal/landing', '/welcome', '/admin/team', '/admin/inventory/stock'],
+  ],
+  [
+    '{ prefix: "none", overrides: { features: { "shop/admin/private/inventory": "feature" }, groups: { "shop/admin/private": true } } }',
+    ['/landing', '/welcome', '/team', '/private/inventory/stock'],
+  ],
+])(
+  'honors feature and group defaults and per-declaration overrides (%s)',
+  { timeout },
+  async (routing, paths) => {
+    await fixture(
+      {
+        '(portal)/app/pages/landing.vue': page,
+        'features/shop/app/pages/welcome.vue': page,
+        'features/shop/(admin)/app/pages/team.vue': page,
+        'features/shop/(admin)/(private)/features/inventory/app/pages/stock.vue': page,
+      },
+      (root) =>
+        withNuxt(root, async (nuxt) => {
+          const snapshot = await buildWithMembership(nuxt)
+          expect(snapshot?.routes.map((route) => route.path).sort()).toEqual([...paths].sort())
+        }),
+      `feature: { pages: { enabled: true }, routing: ${routing} },`,
+      false,
+    )
+  },
+)
+
+it.each([
+  ['{ overrides: { features: { unknown: "none" } } }', 'unknown declaration "unknown"'],
+  ['{ overrides: { features: { portal: "none" } } }', 'requires a structural feature'],
+  ['{ overrides: { groups: { shop: true } } }', 'requires a structural group'],
+  [
+    '{ overrides: { groups: { "@pages/(portal)": true } } }',
+    'unknown declaration "@pages/(portal)"',
+  ],
+  ['{ prefix: "group" }', 'prefix must be "feature" or "none"'],
+  ['{ groupPrefix: "true" }', 'groupPrefix must be a boolean'],
+  ['{ overrides: { groups: { portal: "true" } } }', 'overrides.groups["portal"] must be a boolean'],
+])('rejects invalid routing options (%s) at setup', { timeout }, async (routing, diagnostic) => {
+  await fixture(
+    { 'features/shop/app/pages/index.vue': page, '(portal)/app/pages/index.vue': page },
+    async (root) => {
+      await expect(withNuxt(root, async () => {})).rejects.toThrow(diagnostic)
+    },
+    `feature: { routing: ${routing} },`,
+    false,
+  )
+})
+
+it('leaves native-only duplicate transparent groups to Nuxt', { timeout }, async () => {
+  await fixture(
+    {
+      'app/pages/(one)/index.vue': page,
+      'app/pages/(two)/index.vue': page,
+      'features/shop/app/pages/(three)/index.vue': page,
+    },
+    (root) =>
+      withNuxt(root, async (nuxt) => {
+        const snapshot = (await buildWithMembership(nuxt))!
+        const native = snapshot.routes.filter((route) => route.path === '/')
+        expect(native).toHaveLength(2)
+        expect(
+          native
+            .flatMap((route) =>
+              route.sources.flatMap((source) => source.nativeGroups.map((group) => group.id)),
+            )
+            .sort(),
+        ).toEqual(['@pages/(one)', '@pages/(two)'])
+        expect(
+          snapshot.routes.some((route) => route.path === '/shop' && route.name === 'shop'),
+        ).toBe(true)
+        expect(
+          nuxt.apps.default?.pages?.find((route) => route.path === '/')?.children?.[0]?.path,
+        ).toBe('')
+      }),
+    'feature: { pages: { enabled: true }, routing: { groupPrefix: true } },',
+    false,
+  )
+})
+
+it.each([
+  ['features/shop/app/pages/team.vue', 'features/shop/(admin)/app/pages/team.vue', '', 'shop-team'],
+  [
+    'features/shop/app/pages/(one)/index.vue',
+    'features/shop/app/pages/(two)/index.vue',
+    '',
+    '/shop',
+  ],
+  [
+    'features/shop-admin/app/pages/team.vue',
+    'features/shop/(admin)/app/pages/team.vue',
+    'routing: { groupPrefix: true },',
+    'shop-admin-team',
+  ],
+  ['features/shop/app/pages/index.vue', 'app/pages/shop.vue', '', 'shop'],
+])('rejects collisions after mounting %s and %s', { timeout }, async (a, b, routing, identity) => {
+  await fixture(
+    { [a]: page, [b]: page },
+    (root) => expectPageCollision(root, identity, a, b),
+    `feature: { pages: { enabled: true }, ${routing} },`,
+    false,
+  )
+})
