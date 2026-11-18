@@ -7,6 +7,7 @@ import type { ComponentsOptions } from './integrations/components.js'
 import { registerFeatureComposables } from './integrations/composables.js'
 import type { ComposablesOptions } from './integrations/composables.js'
 import { registerFeaturePages, type PagesOptions } from './integrations/pages.js'
+import { registerFeatureServer, type ServerOptions } from './integrations/server.js'
 import type { RootOptions } from './core/types.js'
 export type { FeaturePrefix, RoutingOptions } from './core/routing.js'
 
@@ -16,6 +17,7 @@ export interface ModuleOptions {
   composables?: ComposablesOptions
   pages?: PagesOptions
   routing?: RoutingOptions
+  server?: ServerOptions
 }
 const module: NuxtModule<ModuleOptions> = defineNuxtModule<ModuleOptions>({
   meta: { name: '@up-nuxt/features', configKey: 'feature', compatibility: { nuxt: '^4.6.4' } },
@@ -23,6 +25,7 @@ const module: NuxtModule<ModuleOptions> = defineNuxtModule<ModuleOptions>({
     components: { autoImport: true, prefix: true },
     composables: { autoImport: false },
     pages: { enabled: false },
+    server: { enabled: false },
   },
   async setup(options, nuxt) {
     const result = await scanProject(
@@ -49,6 +52,7 @@ const module: NuxtModule<ModuleOptions> = defineNuxtModule<ModuleOptions>({
     await registerFeatureComponents(result.registry, options.components ?? {}, nuxt)
     await registerFeatureComposables(result.registry, options.composables ?? {}, nuxt)
     await registerFeaturePages(result.registry, options.pages ?? {}, nuxt, prefixFor)
+    registerFeatureServer(result.registry, options.server ?? {}, nuxt, prefixFor)
     logger.debug(`Discovered ${result.registry.features.length} features`)
   },
 })

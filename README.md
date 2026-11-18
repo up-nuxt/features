@@ -2,7 +2,7 @@
 
 Feature organization for Nuxt. Repository: [up-nuxt/features](https://github.com/up-nuxt/features).
 
-The module supports explicit application/server resource scopes, Nuxt component auto-imports, opt-in feature composable imports, and opt-in Feature Pages. Nitro registration and OpenFeature are future work.
+The module supports explicit application/server resource scopes, Nuxt component auto-imports, opt-in feature composable imports, and opt-in Feature Pages. Feature Nitro resources are opt-in. OpenFeature is future work.
 
 ## Directory conventions
 
@@ -117,6 +117,21 @@ An override applies to the named declaration's segment. Descendants keep their o
 Nuxt applies explicit `definePageMeta` paths, names and aliases with its usual precedence. An absolute path or alias can opt out of the mount. Relative child paths and aliases resolve within their effective router parent.
 
 A structural Group such as `features/(dashboard)` contributes ownership. A directory such as `app/pages/(dashboard)` or `features/shop/app/pages/(dashboard)` contributes a distinct native Route Group. Feature routes with ambiguous names, paths or static aliases fail with a diagnostic. Restart Nuxt when adding, renaming or removing Pages or Groups to guarantee topology updates. See the [architecture](docs/architecture.md#pages-and-native-route-groups) for metadata, development recovery and filesystem limits.
+
+## Server resources
+
+```ts
+export default defineNuxtConfig({
+  modules: ['@up-nuxt/features'],
+  feature: { server: { enabled: true } },
+})
+```
+
+Only Server scopes contribute Nitro resources. Feature registration currently supports Nitro 2.13.6. The Vite App import boundary still applies when Feature Server registration is disabled. With the default routing policy, `features/shop/server/api/products.get.ts` registers `GET /api/shop/products`, and `features/shop/server/routes/health.get.ts` registers `GET /shop/health`. Nitro's API mount is independent of the Feature prefix. Features contribute their enabled ancestry, and structural Groups contribute segments only when enabled by `feature.routing`. Native Nitro filename conventions provide index, parameters, catch-all parameters, methods and environment suffixes.
+
+Server middleware is global. Nitro plugins run at Nitro startup, including when the development worker restarts. Neither receives a URL prefix. Import Feature `utils/` and `types/` explicitly within server code. They receive no registration or global auto-imports. Native server discovery and Layer precedence continue to apply to native resources.
+
+Restart Nuxt after adding, removing or renaming Feature resource files or changing routing options. The build checks symlinks and protects registered entry points on reload. An unsafe replacement is unavailable until a valid entry is restored and the server is restarted. See the [architecture](docs/architecture.md#nitro-server-resources) for collision, ordering and security details.
 
 ## Development
 

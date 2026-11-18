@@ -27,7 +27,7 @@ const showcase = useShowcaseSummary()
       <NuxtLink to="/shop">Home</NuxtLink>
       <NuxtLink to="/shop/products/42">Product 42</NuxtLink>
       <NuxtLink to="/shop/inventory/inventory">Inventory</NuxtLink>
-      <NuxtLink to="/shop/checkout">Checkout</NuxtLink>
+      <NuxtLink to="/shop/checkout/checkout">Checkout</NuxtLink>
       <NuxtLink to="/showcase">Showcase</NuxtLink>
       <NuxtLink to="/help">Help</NuxtLink>
     </nav>

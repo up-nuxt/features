@@ -3,16 +3,16 @@ import { isAbsolute, join, relative, sep } from 'node:path'
 
 export function symlinkError(
   path: string,
-  resource: 'component' | 'composable' | 'page' = 'component',
+  resource: 'component' | 'composable' | 'page' | 'server' = 'component',
 ): Error {
   return new Error(
-    `[FEATURE_${resource.toUpperCase()}_SYMLINK] Refusing to scan or register a symlink in a feature ${resource} directory: ${path}. Remove the link or copy the intended application files into the directory. No symlink targets are allowed, including file links and internal links.`,
+    `[FEATURE_${resource.toUpperCase()}_SYMLINK] Refusing to scan or register a symlink in a feature ${resource} directory: ${path}. Remove the link or copy the intended files into the directory. No symlink targets are allowed, including file links and internal links.`,
   )
 }
 /** Safety inspection only. Never follows links. */
 export async function assertSafeResourceTree(
   directory: string,
-  resource: 'component' | 'composable' | 'page',
+  resource: 'component' | 'composable' | 'page' | 'server',
 ): Promise<void> {
   const pending = [directory]
   while (pending.length) {
