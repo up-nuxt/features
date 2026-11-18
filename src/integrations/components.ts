@@ -1,7 +1,8 @@
 import { isAbsolute, relative, sep } from 'node:path'
 import { addComponentsDir, resolveAlias } from '@nuxt/kit'
 import type { Component, ComponentsDir, Nuxt } from '@nuxt/schema'
-import { assertSafeComponentFile, assertSafeComponentTree } from './component-safety.js'
+import { assertSafeComponentFile } from './component-safety.js'
+import { assertSafeResourceTree } from './resource-safety.js'
 import type { FeatureRegistry } from '../core/types.js'
 
 export interface ComponentsOptions {
@@ -88,7 +89,7 @@ export async function registerFeatureComponents(
   if (options.autoImport === false) return
   const directories = getComponentDirectories(registry, options.prefix !== false)
   if (!directories.length) return
-  for (const directory of directories) await assertSafeComponentTree(directory.path)
+  for (const directory of directories) await assertSafeResourceTree(directory.path, 'component')
   for (const directory of directories) addComponentsDir({ ...directory, pathPrefix: true })
   const guard = createCollisionGuard(directories.map((directory) => directory.path))
   const checkedDirectories = new Set<string>()
@@ -100,7 +101,7 @@ export async function registerFeatureComponents(
   nuxt.hook('modules:done', () => {
     nuxt.hook('components:dirs', async (dirs) => {
       resetScan()
-      for (const directory of directories) await assertSafeComponentTree(directory.path)
+      for (const directory of directories) await assertSafeResourceTree(directory.path, 'component')
       for (let index = 0; index < dirs.length; index++) {
         const original = dirs[index]!
         const dir: ComponentsDir =
@@ -118,7 +119,7 @@ export async function registerFeatureComponents(
               directories.find((directory) => within(directory.path, originalFilePath))
             if (featureDirectory) {
               if (!checkedDirectories.has(featureDirectory.path)) {
-                await assertSafeComponentTree(featureDirectory.path)
+                await assertSafeResourceTree(featureDirectory.path, 'component')
                 checkedDirectories.add(featureDirectory.path)
               }
               await assertSafeComponentFile(featureDirectory.path, component.filePath)

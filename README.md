@@ -2,7 +2,7 @@
 
 Feature organization for Nuxt. Repository: [up-nuxt/features](https://github.com/up-nuxt/features).
 
-Milestone 2.1 supports explicit application/server resource scopes and native Nuxt component auto-imports. Pages, composable auto-import, Nitro registration, OpenFeature and other integrations are future work.
+The module supports explicit application/server resource scopes, Nuxt component auto-imports, and opt-in feature composable imports. Pages registration, Nitro registration, and OpenFeature are future work.
 
 ## Directory conventions
 
@@ -66,6 +66,19 @@ Prefixes follow actual Feature ancestry and omit all Group ancestors. Nuxt contr
 All contributing directories survive without source precedence. Cross-directory collisions involving feature components fail with both paths in FEATURE_COMPONENT_COLLISION. Complementary client/server variants may share a name. Same-directory duplicates retain Nuxt's own NUXT_B3011 warning; integration tests compare native warning counts with and without the module.
 
 Eligible feature component directories reject both file and directory symlinks with FEATURE_COMPONENT_SYMLINK, including links into Server-only services. A normal component alongside a link does not bypass the fail-closed policy. Later candidates are rechecked before registration. Nuxt may enumerate a late-created link before its public callback runs; this protection is not an OS sandbox. See [architecture](docs/architecture.md) for exact boundaries, scan lifecycle and diagnostics.
+
+## Composables
+
+Enable App-scope composable imports with `feature.composables.autoImport: true`. They are disabled by default.
+
+```ts
+export default defineNuxtConfig({
+  modules: ['@up-nuxt/features'],
+  feature: { composables: { autoImport: true } },
+})
+```
+
+For example, export `useCart` from `app/features/shop/composables/useCart.ts` or `features/shop/app/composables/useCart.ts`. Nuxt uses the exported name for named exports and the filename for default exports. Use an index barrel to expose nested files. Apps, Groups, and nested Features use the same naming rules. Feature imports have no automatic prefix, and ambiguous names produce a diagnostic. See the [architecture](docs/architecture.md#composable-auto-imports) for priority, symlink, and development refresh behavior.
 
 ## Development
 

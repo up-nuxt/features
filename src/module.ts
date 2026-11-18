@@ -3,14 +3,17 @@ import { defineNuxtModule, useLogger } from '@nuxt/kit'
 import { scanProject } from './core/index.js'
 import { registerFeatureComponents } from './integrations/components.js'
 import type { ComponentsOptions } from './integrations/components.js'
+import { registerFeatureComposables } from './integrations/composables.js'
+import type { ComposablesOptions } from './integrations/composables.js'
 import type { RootOptions } from './core/types.js'
 export interface ModuleOptions {
   roots?: RootOptions
   components?: ComponentsOptions
+  composables?: ComposablesOptions
 }
 const module: NuxtModule<ModuleOptions> = defineNuxtModule<ModuleOptions>({
   meta: { name: '@up-nuxt/features', configKey: 'feature', compatibility: { nuxt: '^4.6.4' } },
-  defaults: { components: { autoImport: true, prefix: true } },
+  defaults: { components: { autoImport: true, prefix: true }, composables: { autoImport: false } },
   async setup(options, nuxt) {
     const result = await scanProject(
       {
@@ -33,6 +36,7 @@ const module: NuxtModule<ModuleOptions> = defineNuxtModule<ModuleOptions>({
     for (const diagnostic of result.diagnostics)
       logger.warn(`[${diagnostic.code}] ${diagnostic.message}`)
     await registerFeatureComponents(result.registry, options.components ?? {}, nuxt)
+    await registerFeatureComposables(result.registry, options.composables ?? {}, nuxt)
     logger.debug(`Discovered ${result.registry.features.length} features`)
   },
 })

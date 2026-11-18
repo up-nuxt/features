@@ -15,6 +15,6 @@ This is the independent `up-nuxt/features` repository, published as `@up-nuxt/fe
 - Source order is presentation only; integrations must never infer precedence from it.
 - Follow directory symlinks only after an explicit design change and traversal safety tests.
 - Discuss changes to public configuration and identity conventions before implementing them.
-- Keep work within the requested milestone. Milestone 2.1 registers component directories only; keep Pages, imports, Nitro, and flags outside this scope.
+- Keep work within the requested milestone. Milestone 2.2 adds opt-in composable imports from App scopes. Keep Pages, Nitro, and flags outside this scope.
 - Validate changes with the relevant package scripts and report only checks actually executed.
 - The sibling `nuxt-state` repository is a read-only tooling reference.
