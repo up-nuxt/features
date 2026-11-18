@@ -1,4 +1,8 @@
 export type RootKind = 'general' | 'app' | 'server'
+export type RuntimeLayout = 'app' | 'server' | 'full-stack'
+/** Shared is reserved; currently rejected by discovery and registry validation. */
+export type ScopeKind = 'app' | 'server' | 'shared'
+export type DiscoveryOrigin = 'feature-container' | 'project-group' | 'native-pages'
 export type DeclarationKind = 'feature' | 'group'
 export type DeclarationOrigin = 'feature-root' | 'native-pages'
 export interface RootDirectories {
@@ -8,6 +12,7 @@ export interface RootDirectories {
 }
 export type RootOptions = Partial<Record<RootKind, string | false>>
 export interface FeatureRoot {
+  readonly discovery: DiscoveryOrigin
   readonly kind: RootKind
   readonly path: string
   readonly layer?: string
@@ -26,6 +31,12 @@ export interface Diagnostic {
     | 'INVALID_PARENT'
     | 'MISSING_PARENT'
     | 'CYCLIC_PARENT'
+    | 'INVALID_RESOURCE_LOCATION'
+    | 'MISPLACED_DECLARATION'
+    | 'UNSUPPORTED_SCOPE'
+    | 'INVALID_SCOPE'
+    | 'INVALID_SOURCE_OWNERSHIP'
+    | 'SYMLINK_RESOURCE'
   readonly severity: 'error' | 'warning'
   readonly message: string
   readonly paths: readonly string[]
@@ -34,12 +45,18 @@ export interface Diagnostic {
 export interface ResourceDirectory {
   readonly name: string
   readonly path: string
-  readonly boundary: 'app' | 'server' | 'shared'
 }
-export interface FeatureSource {
-  readonly root: FeatureRoot
+export interface ResourceScope {
+  readonly kind: ScopeKind
   readonly path: string
   readonly resources: readonly ResourceDirectory[]
+}
+export interface FeatureSource {
+  readonly featureId: string
+  readonly layout: RuntimeLayout
+  readonly root: FeatureRoot
+  readonly path: string
+  readonly scopes: readonly ResourceScope[]
 }
 /** A physical declaration. Scanner output is untrusted until registry validation succeeds. */
 export interface FeatureDeclaration {

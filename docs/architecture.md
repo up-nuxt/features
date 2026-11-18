@@ -1,97 +1,156 @@
-# Foundation architecture
+# Feature architecture and Components Integration
 
-Repository: `up-nuxt/features`. Package: `@up-nuxt/features`. Nuxt config key: `feature`.
+Repository: `up-nuxt/features`. Package: `@up-nuxt/features`. Configuration key: `feature`. This contract replaces the previous unpublished convention.
 
-## Scope and data flow
+## Scope and verified versions
 
-Milestone 1 discovers physical declarations and constructs an immutable logical registry at module setup. Nuxt 4.6.4 is the validated baseline, using Node 24 or 26 and TypeScript 6. Core uses Node filesystem APIs independently of Nuxt, Vue, Nitro and OpenFeature.
+Milestone 2.1 integrates component directories only. Pages/routing, native page-group discovery, composable imports, Nitro registration, OpenFeature, layers/precedence and complete feature-discovery HMR are future work. Core remains independently testable without Nuxt.
+
+Nuxt, Kit and Schema are pinned to 4.6.4 in package.json and the lockfile. Module compatibility is `^4.6.4`; local source inspection and integration tests verify 4.6.4. The playground consumes root dependencies and the built module, with no separate dependency manifest. Nuxt 4.5.2 compatibility is not claimed and would require independent verification. Node 24 or 26 and TypeScript 6 are configured; local checks use Node 24.
+
+## Declaration locations and runtime layouts
+
+| Declaration location | Discovery | Layout | Runtime scope paths |
+| --- | --- | --- | --- |
+| `<srcDir>/features/shop` | feature-container | app | declaration itself |
+| `<serverDir>/features/shop` | feature-container | server | declaration itself |
+| `<rootDir>/features/shop` | feature-container | full-stack | `app/`, `server/` beneath declaration |
+| `<rootDir>/(shop)` | project-group | full-stack | `app/`, `server/` beneath declaration |
+
+Root options remain `feature.roots.general`, `app`, and `server` (path or `false`). Defaults append `features` to Nuxt's resolved rootDir/srcDir/serverDir. Relative overrides resolve from rootDir. The role `general` now means full-stack layout, not implicit application resources. Literal `app/` and `server/` within full-stack declarations are scope boundaries, independent of the project's customized srcDir/serverDir names.
+
+Missing roots are valid. Canonicalization resolves the deepest existing ancestor and appends unresolved suffixes, retaining alias-overlap detection for missing targets. Equal or nested configured roots produce diagnostics using filesystem-relative boundaries, not textual prefixes.
+
+Root-level group discovery selects only immediate project children starting with `(`, validates their names, and scans each selected group subtree with the full-stack grammar. It never turns the entire project root into an ordinary feature container. Symlink group roots are rejected. Overlap checks compare selected group subtrees against configured roots, including canonical aliases, to avoid scanning one physical subtree twice. Ordinary project directories, native project `shared/`, and `app/pages/(group)` are untouched.
+
+## Discovery grammar
+
+Visible immediate children of feature containers declare `name/` features or `(name)/` groups. Names use lowercase ASCII kebab-case, starting with a letter. Invalid names are diagnosed without lowercasing, renaming or Unicode normalization. Native Nuxt group names are not subject to that policy.
+
+Only declaration-level `features/<declaration>/` or `(name)/` introduces nesting. Child declarations inherit the source's layout:
 
 ```text
-Resolved roots -> Physical declarations -> Registry validation -> Immutable snapshot
-                                             |
-                                             +-> Diagnostics (no registry on error)
+app/features/shop/(checkout)/components
+server/features/shop/(checkout)/api
+features/shop/(checkout)/app/pages
+features/shop/(checkout)/server/api
+features/shop/features/payment/app/components
+(shop)/(checkout)/app/components
+(shop)/features/inventory/server/api
 ```
 
-Resource registration, native page discovery, routing, runtime manifests, resource membership resolution, flag evaluation, layer precedence and HMR are outside this milestone.
+Full-stack children sit beside `app/` and `server/`, and define their own explicit scopes. App/server-only children retain their existing direct-resource layout. Structural names `app`, `server` and `features` never become logical identity segments.
 
-## Root resolution and traversal
+The scanner stops at resources and arbitrary ordinary directories. `pages/(dashboard)` is opaque to core discovery and belongs to eventual native routing integration. It does not create a feature entry. Services/repositories/tests/stores and other arbitrary directories are not automatically registered or recursively interpreted as declarations; place runtime helpers inside their intended app/server scope. Arbitrary opaque declaration-level directories do not receive an inferred runtime owner.
 
-`feature.roots` accepts `general`, `app`, and `server`, each a path or `false`. Defaults append `features` to Nuxt's resolved `rootDir`, `srcDir`, and `serverDir`. Relative overrides resolve against `rootDir`.
+## Resource scopes and diagnostics
 
-Missing roots are valid. Root canonicalization resolves the deepest existing ancestor using `realpath`, then appends the unresolved suffix. Consequently, paths through symlinked ancestors have the same canonical identity before and after target creation. Overlap validation uses filesystem-relative path boundaries, not textual prefixes; `features-extra` is not a descendant of `features`.
-
-Equal or nested roots, empty paths, files and symlink roots produce structured errors. Conflicting root pairs are excluded from discovery, and any error prevents a successful project result. Projects with `srcDir === rootDir` must disable or relocate one duplicate root.
-
-The scanner never follows directory symlinks, including feature, resource and explicit nesting boundaries. Configured paths may have symlinked ancestors, which root resolution canonicalizes. Discovery assumes a trusted local tree; it is not a sandbox against concurrent filesystem changes.
-
-## Physical declarations and naming
-
-Visible immediate child directories of a root declare features or parenthesized groups. Within a declaration, only immediate `(name)` directories and immediate children of `features/` introduce nested declarations. Ordinary directories stop feature discovery regardless of their contents; hidden directories are ignored. The scanner records physical provenance and naming errors, not logical parent validity or Nuxt routes.
-
-Module-defined names follow lowercase kebab-case: a lowercase ASCII letter, followed by lowercase letters or digits, with single hyphens separating nonempty segments. Examples: `shop`, `shop-v2`, `(checkout-flow)`. Uppercase, whitespace, underscores, Unicode and malformed separators are rejected explicitly, never renamed or normalized. These module naming rules do not apply to native Nuxt groups.
-
-`shop/features/checkout` declares a feature with ID `shop/checkout`; `shop/(checkout)` declares a group with the same ID. They are incompatible kinds. Feature identity segments always use `/`, independent of the host filesystem.
-
-Every `FeatureDeclaration` retains its ID, local name, kind, origin, structural parent, root role/path, optional future layer origin, physical directory and resource directories. Scanner declarations remain separate from merged logical entries.
-
-## Resource boundaries
-
-- General/app roots discover `pages`, `components`, `composables`, `utils`, `middleware`, `plugins`, and `types` as app resources.
-- General roots also discover `shared` and recognized resource directories beneath `server/`.
-- Server roots discover `api`, `routes`, `middleware`, `utils`, `plugins`, and `types` directly as server resources.
-
-Server APIs therefore live at `features/shop/server/api` or `server/features/shop/api`. App roots never contribute server resources. Arbitrary folders, including `stores`, services, repositories and tests, receive no special processing. Resource records describe directories with explicit app/server/shared boundaries; they do not imply registration or change TypeScript import behavior.
-
-## Registry invariants and merging
-
-`buildRegistry` validates all physical declarations before constructing a registry:
-
-- IDs and local names agree with their namespace's identity contract.
-- Each logical ID has a consistent origin, declaration kind and parent.
-- Multiple compatible declarations from different roots merge; all sources and all resource contributions are preserved.
-- Competing declarations in the same root produce duplicate diagnostics, including when their kinds also conflict.
-- Required parents exist; parent identities are structurally compatible.
-- Self-parenting and multi-entry cycles fail, including cycles contributed by conflicting declarations.
-- Module IDs differing only by case produce a collision diagnostic in addition to invalid-name diagnostics. No case folding changes an ID.
-
-All conflicting declarations contribute to diagnostics. There is no winning declaration, override or fallback registry. A kind or parent conflict is not resolved by traversal or absolute project location.
-
-Entries and child IDs use explicit lexical ID ordering. Sources sort by root role, optional layer label and declaration-relative path, with physical paths only breaking otherwise identical display keys. This is deterministic presentation, not precedence; every source survives a successful merge. Future resolvers must detect resource collisions explicitly instead of treating array position as priority. Layers can be represented in provenance but discovery and precedence remain future work.
-
-## Structural parents and resource membership
-
-`parentId` is structural hierarchy between registered logical entries. Module-defined nested IDs require their immediate logical parent: `shop/checkout/payment` has parent `shop/checkout`. Top-level IDs have no parent. `children` is computed once from validated relationships.
-
-Resource membership is a separate many-to-many association. The reserved `ResourceMembership` type identifies a physical resource and a set-like list of `scopeIds`; this milestone does not generate these records or resolve membership. A future page may belong to both a feature scope and a native route group without having multiple structural parents.
-
-## Native Nuxt groups
-
-The `native-pages` origin reserves IDs such as:
-
-- `@pages/(dashboard)`
-- `@pages/admin/(dashboard)`
-- `@pages/(admin)/(dashboard)`
-
-Full relative directory hierarchy, including ordinary path segments and parenthesis syntax, remains in the ID and physical provenance. The parent is the nearest registered ancestor native group. `@pages/admin/(dashboard)` does not require a synthetic `@pages/admin` entry. If a nearer native ancestor exists, omitting or skipping it is invalid.
-
-Native identities are independent of module feature IDs. Matching names never automatically connect them. Registry contract tests exercise native IDs without scanning pages. The registry only checks namespace/relative-path structure and the group leaf; it neither applies module kebab-case restrictions nor claims to reproduce Nuxt's route-group grammar. Native case compatibility is left to Nuxt integration verification. Nuxt's `route.meta.groups` remains untouched.
-
-## Snapshot and result contract
+A source explicitly records:
 
 ```ts
-type RegistryBuildResult =
-  | { success: true; registry: FeatureRegistry; diagnostics: readonly Diagnostic[] }
-  | { success: false; diagnostics: readonly Diagnostic[] }
+interface FeatureSource {
+  readonly featureId: string
+  readonly root: FeatureRoot // role, discovery origin, canonical path, optional layer origin
+  readonly path: string // physical declaration
+  readonly layout: 'app' | 'server' | 'full-stack'
+  readonly scopes: readonly ResourceScope[]
+}
+interface ResourceScope {
+  readonly kind: 'app' | 'server' | 'shared'
+  readonly path: string
+  readonly resources: readonly ResourceDirectory[] // name + path; no duplicated boundary field
+}
 ```
 
-Errors from root resolution, discovery or registry validation deny a registry property altogether. Warnings are preserved but allow success. The Nuxt adapter narrows on `success` before accessing the registry.
+`shared` is reserved in the type model for future extension; discovery and registry validation reject it today. No shared resource registration is implemented. Both `features/shop/shared` and `(shop)/shared` produce `UNSUPPORTED_SCOPE`; Nuxt's native project-level shared directory is unrelated.
 
-Snapshot records, arrays, roots, resources, structural children and diagnostics expose read-only types and are frozen at runtime. Known record shapes are copied explicitly; no mutable scanner input objects are retained. There is no generic recursive cloning/freezing machinery. Integrations must derive a new projection rather than mutate registry state. Build-time physical paths must not be serialized wholesale into future browser manifests.
+App scopes recognize components, composables, pages, utils, middleware, plugins and types. Server scopes recognize api, routes, middleware, utils, plugins and types. Resource records describe directories only. Helper directories such as server services remain ordinary explicitly imported code, not new auto-import conventions.
 
-## Future flag bindings
+Invalid examples:
 
-Features and groups may both gain explicit flag bindings later. Structural hierarchy can supply ancestor evaluation order, while resource membership can supply multiple applicable scopes. Neither model performs flag evaluation today. Parenthesized names imply no URL prefix, component prefix or flag key. Feature availability remains separate from authorization; runtime evaluation does not imply build-time code removal.
+| Path | Diagnostic |
+| --- | --- |
+| `features/shop/components`, `features/shop/api` | INVALID_RESOURCE_LOCATION: explicit scope required |
+| `features/shop/app/features/checkout` | MISPLACED_DECLARATION: nest beside scopes |
+| `features/shop/server/(checkout)` | MISPLACED_DECLARATION |
+| `app/features/shop/server/api` | INVALID_SCOPE: server boundary inside app declaration |
+| `server/features/shop/server/api` | INVALID_SCOPE: redundant runtime boundary |
+| `server/features/shop/components` | INVALID_RESOURCE_LOCATION: app resource in server scope |
+| full-stack `shared/` | UNSUPPORTED_SCOPE |
+
+Symlinks at recognized resource paths or runtime boundaries are rejected with `SYMLINK_RESOURCE` without traversing the target. Symlinks at unrelated opaque paths remain ignored.
+
+Physical discovery records provenance and location diagnostics; logical validation remains the registry's responsibility. No resolver independently discovers features.
+
+## Logical identities and cross-root merges
+
+Identity is independent of physical layout and eventual URL paths:
+
+```text
+features/shop/(checkout)/app/components
+app/features/shop/(checkout)/components
+server/features/shop/(checkout)/api
+    -> shop/checkout (group; parent shop)
+```
+
+Compatible ID, kind, origin and structural parent merge across distinct roots. A full-stack source can contribute both app and server scopes to the same entry. All compatible sources/scopes/resources survive; no root takes precedence. Project groups and groups inside feature containers share the module-defined namespace, so `(shop)` and `app/features/(shop)` can merge. `(shop)` and `features/shop` conflict because group and feature kinds differ.
+
+Registry validation enforces names/IDs, logical source ownership (`featureId`) and physical ownership relative to the canonical discovery root, source layout, scope kind/location, unique scope kinds, resource location, same-root duplicate detection, consistent declaration kinds/parents, required parent existence, structural compatibility and cycles. Case-only module identity collisions are diagnosed. Conflicting declarations contribute diagnostics; none becomes a winning fallback entry.
+
+Source ordering is deterministic presentation: root role, physical discovery mode, optional layer origin and relative declaration path, with physical paths only breaking otherwise identical keys. Resolver priority must never be inferred from array position. Component naming conflicts remain an explicit integration error.
+
+A feature-container source must be a strict descendant of its root. A top-level project group owns its root directory, and its nested declarations must be descendants. Reserved native-page sources must match the relative directory hierarchy encoded by their `@pages/` identity. These ownership checks are lexical against the canonical paths supplied by discovery, with no additional filesystem access.
+
+## Structural parents, membership and native groups
+
+For module identities, `parentId` is the immediate registered feature/group ancestor. `shop/checkout/payment` requires structural parent `shop/checkout`, regardless of app/server/full-stack layout. Children are computed deterministically from validated relationships.
+
+Resource membership is separate and potentially many-to-many. `ResourceMembership` reserves physical path plus logical scope IDs, but no membership resolver exists yet. One future page may belong to a feature and a native route group without acquiring two structural parents.
+
+Native identities remain separate: `@pages/(dashboard)`, `@pages/admin/(dashboard)` and `@pages/(admin)/(dashboard)`. Their full relative syntax is retained; their parent is the nearest registered native group, without synthetic ordinary-directory entries. Core does not scan page resources for these entries, reproduce Nuxt route parsing, restrict native names to module kebab-case, or modify `route.meta.groups`.
+
+Future explicit OpenFeature bindings attach to logical IDs independently of runtime layout. Features and groups may both be bound. Structural ancestry can supply inheritance and future resource membership can supply applicable gates. Groups generate neither implicit flag keys nor URL segments. Feature flags are not authorization and runtime evaluation does not imply code exclusion.
+
+## Immutable registry results
+
+`RegistryBuildResult` is a discriminated success/failure union. Errors from roots, discovery or logical validation deny a registry property; warnings remain compatible with success. Integrations narrow on success before using the snapshot.
+
+Known shapes are copied explicitly and frozen: registry, entries, sources, roots, scope records/arrays, resource records/arrays, children and diagnostics. Read-only types and runtime freezing protect against scanner-input mutation and downstream corruption without generic cloning machinery. Physical paths belong to build-time metadata, not future wholesale browser serialization.
+
+## Components Integration
+
+`src/integrations/components.ts` projects only app scopes and their components resources. Root role does not substitute for scope ownership. The scanner and registry are the only feature-discovery foundation. `addComponentsDir` delegates actual component scanning/naming to Nuxt.
+
+`feature.components.autoImport` and `prefix` default to true. Disabling auto-import skips registrations, collision hooks and component safety inspection. Disabling prefix removes feature prefixes while preserving Nuxt's native internal path-prefix behavior.
+
+Prefixes follow actual structural ancestors of kind feature. Every group ancestor is omitted:
+
+```text
+features/shop/app/components/ProductCard.vue -> ShopProductCard
+app/features/shop/components/CartSummary.vue -> ShopCartSummary
+features/shop/(checkout)/app/components/Badge.vue -> ShopBadge
+features/shop/(checkout)/features/inventory/app/components/Stock.vue -> ShopInventoryStock
+(shop)/app/components/ProductCard.vue -> ProductCard
+(shop)/features/inventory/app/components/Stock.vue -> InventoryStock
+features/shop/app/components/forms/Input.vue -> ShopFormsInput
+```
+
+Nuxt 4.6.4 performs PascalCase conversion, duplicate-segment/index handling and render-mode naming. Public extendComponent callbacks expose names before native empty-name validation and cross-directory deduplication. The collision guard skips candidates whose original Nuxt name was empty, leaving `NUXT_B3010` to Nuxt; components:extend alone sees an already deduplicated result. Cross-directory names with overlapping modes fail with FEATURE_COMPONENT_COLLISION when a feature candidate participates. Client/server pairs and repeated observations of one file are allowed; native-only collisions retain Nuxt behavior. Same-directory duplicates precede our callback and preserve native NUXT_B3011 diagnostics. Programmatic replacement outside directory scanning is not exhaustively audited.
+
+Nuxt's default application scan gives `components/global/` and `components/islands/` dedicated directory entries. Feature component directories are registered as a single scan entry each, so their `global/` and `islands/` children are ordinary path-prefix directories. Nuxt's filename suffix handling (such as `.global.vue` and `.island.vue`) still applies under its normal configuration. Directory-level parity should be considered separately because it changes naming, registration and collision semantics.
+
+## Component safety and scan lifecycle
+
+Nuxt 4.6.4 passes pattern/cwd/ignore to tinyglobby, whose default follows symlinks; public directory options expose no no-follow switch. Static ignore globs are not used as a durable safety policy.
+
+The selected policy is fail-closed. An iterative lstat/readdir inspection rejects all file/directory symlinks in eligible app component directories before registration and on directory resolution. FEATURE_COMPONENT_SYMLINK names the link. A normal file beside a link does not make the directory partially usable; remove the link or copy the intended app component.
+
+On subsequent native scans, the first protected candidate triggers a fresh tree inspection; each candidate path and physical boundary is checked as well. Registered-directory ownership prevents escaped glob results bypassing validation. A callback-modified path is rechecked; escapes produce FEATURE_COMPONENT_BOUNDARY. This is filesystem safety inspection, not a second Vue component scanner.
+
+Nuxt exposes no before-every-glob hook. A late-created link may be enumerated before candidate validation rejects registration. No successful updated component registry is published by that failed scan. This is not an OS sandbox against concurrent adversarial replacement; explicit imports and independently configured native directories remain outside the feature-directory policy.
+
+Collision and safety caches are instance-local and reset after success, collision or wrapped-callback failure. Existing callbacks receive the original argument and native directory receiver. Original exceptions are rethrown unchanged. A retry after a wrapped callback failure can reuse the same descriptors without retaining removed-file collisions. An error inside Nuxt's scanner before it reaches a wrapped callback or the completion hook (for example, a glob compilation error in a later directory) can leave partial state until directory resolution runs again. Nuxt 4.6.4 exposes no public start/failure hook for its direct development rescans. Fix the original scan error and restart Nuxt if a direct retry reports a stale collision. Creating new logical features or previously absent component directories still requires restart in this milestone.
 
 ## Verification
 
-Core tests cover discovery boundaries, mixed nesting, compatible and conflicting merges, root aliases before/after creation, missing/invalid parents, cycles, naming and case collisions, native structural identities, deterministic success/failure results, warning handling, input mutation isolation, and runtime/type-level immutability. Typechecking and package declaration generation validate the contract; a playground consuming the built module verifies Nuxt setup. Cross-platform and Node 26 CI results remain distinct from local Node 24 verification.
+Core suites cover the four declaration locations, explicit boundaries, invalid old layouts, nested placement, selected root-group overlaps/aliases, shared rejection, cross-layout merging, identity/parent invariants, provenance, scope isolation, mutation protection and determinism. Real Nuxt fixtures cover naming, merged app resources, root groups, features inside groups, collisions with both prefix settings, disabled auto-import, native components and warning-count parity. Symlink tests inspect actual registration before/after link removal and on later scans. Lifecycle tests invoke Nuxt's real scan hooks across callback failure/retry and genuine collision. The playground consumes the built module and demonstrates auto-imports through actual SSR. Node 26 and cross-platform CI outcomes are distinct from local Node 24 verification.

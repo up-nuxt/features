@@ -30,11 +30,9 @@ describe('discovery and registry', () => {
   it('merges three roots while preserving resource boundaries', async () => {
     for (const path of [
       'features/shop/server/api',
-      'features/shop/shared',
+      'features/shop/app/components',
       'app/features/shop/components',
       'server/features/shop/api',
-      'server/features/shop/server/api',
-      'app/features/shop/server/api',
     ])
       await directory(path)
     const result = await scan()
@@ -45,7 +43,11 @@ describe('discovery and registry', () => {
     expect(shop.sources).toHaveLength(3)
     expect(
       shop.sources
-        .flatMap((s) => s.resources)
+        .flatMap((s) =>
+          s.scopes.flatMap((scope) =>
+            scope.resources.map((resource) => ({ ...resource, boundary: scope.kind })),
+          ),
+        )
         .map((r) => [r.name, r.boundary])
         .sort(),
     ).toEqual(
@@ -53,12 +55,14 @@ describe('discovery and registry', () => {
         ['api', 'server'],
         ['api', 'server'],
         ['components', 'app'],
-        ['shared', 'shared'],
+        ['components', 'app'],
       ].sort(),
     )
   })
   it('supports both explicit nesting conventions and mixed depth', async () => {
-    await directory('features/shop/features/checkout/(payment)/features/card/(verify)/components')
+    await directory(
+      'features/shop/features/checkout/(payment)/features/card/(verify)/app/components',
+    )
     const result = await scan()
     expect(result.diagnostics).toEqual([])
     expect(result.features.map((f) => [f.id, f.kind])).toEqual([
@@ -79,12 +83,10 @@ describe('discovery and registry', () => {
       'utils',
       'services',
       'repositories',
-      'server',
-      'shared',
       'tests',
       'checkout',
     ])
-      await directory(`features/shop/${name}/(fake)/features/also-fake`)
+      await directory(`app/features/shop/${name}/(fake)/features/also-fake`)
     expect((await scan()).features.map((f) => f.id)).toEqual(['shop'])
   })
   it('treats stores as an ordinary directory, without discovering resources or nested groups', async () => {
@@ -97,7 +99,11 @@ describe('discovery and registry', () => {
     const result = await scan()
     expect(result.diagnostics).toEqual([])
     expect(result.features.map((feature) => feature.id)).toEqual(['shop'])
-    expect(result.features[0]!.sources.flatMap((source) => source.resources)).toEqual([])
+    expect(
+      result.features[0]!.sources.flatMap((source) =>
+        source.scopes.flatMap((scope) => scope.resources),
+      ),
+    ).toEqual([])
   })
   it('reports feature/group conflict in one root', async () => {
     await directory('features/shop/features/checkout')
@@ -192,16 +198,16 @@ describe('roots and traversal safety', () => {
       (await scanWith(dirs, { general: 'file', app: '' })).diagnostics.map((d) => d.code),
     ).toEqual(['INVALID_ROOT', 'INVALID_ROOT'])
   })
-  it('ignores feature, resource, and cyclic directory symlinks', async () => {
-    await directory('features/shop')
+  it('ignores feature, opaque helper, and cyclic directory symlinks', async () => {
+    await directory('features/shop/app')
     await directory('outside/(secret)')
     await symlink(join(project, 'outside'), join(project, 'features', 'linked'), 'dir')
-    await symlink(join(project, 'outside'), join(project, 'features/shop/components'), 'dir')
+    await symlink(join(project, 'outside'), join(project, 'features/shop/app/helpers'), 'dir')
     await symlink(join(project, 'features'), join(project, 'features/shop/(cycle)'), 'dir')
     const result = await scan()
     expect(result.diagnostics).toEqual([])
     expect(result.features.map((f) => f.id)).toEqual(['shop'])
-    expect(result.features[0]!.sources[0]!.resources).toEqual([])
+    expect(result.features[0]!.sources[0]!.scopes.flatMap((scope) => scope.resources)).toEqual([])
   })
   it('detects overlapping roots through symlinked ancestors', async () => {
     await directory('features/shop')

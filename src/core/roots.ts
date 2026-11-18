@@ -1,5 +1,5 @@
-import { lstat, realpath } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { lstat, readdir, realpath } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Diagnostic, FeatureRoot, RootDirectories, RootOptions } from './types.js'
 
 /** Resolve aliases even when the final directory does not exist yet. */
@@ -69,7 +69,34 @@ export async function resolveRoots(
       })
       continue
     }
-    roots.push({ kind, path })
+    roots.push({ kind, path, discovery: 'feature-container' })
+  }
+  // Only direct parenthesized project children are additional declaration roots.
+  // Comparing their subtrees (not all of rootDir) preserves overlap diagnostics.
+  try {
+    const entries = await readdir(dirs.rootDir, { withFileTypes: true })
+    for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      if (!entry.name.startsWith('(') || (!entry.isDirectory() && !entry.isSymbolicLink())) continue
+      const path = join(dirs.rootDir, entry.name)
+      if (entry.isSymbolicLink()) {
+        diagnostics.push({
+          code: 'INVALID_ROOT',
+          severity: 'error',
+          message: 'Root-level feature groups cannot be symlinks.',
+          paths: [path],
+        })
+        continue
+      }
+      roots.push({ kind: 'general', path: await canonicalPath(path), discovery: 'project-group' })
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+      diagnostics.push({
+        code: 'IO_ERROR',
+        severity: 'error',
+        message: `Cannot inspect project groups: ${String(error)}`,
+        paths: [dirs.rootDir],
+      })
   }
   const overlaps = (a: string, b: string) => {
     const rel = relative(a, b)

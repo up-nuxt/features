@@ -1,13 +1,16 @@
 import type { NuxtModule } from '@nuxt/schema'
-import { defineNuxtModule } from '@nuxt/kit'
+import { defineNuxtModule, useLogger } from '@nuxt/kit'
 import { scanProject } from './core/index.js'
+import { registerFeatureComponents } from './integrations/components.js'
+import type { ComponentsOptions } from './integrations/components.js'
 import type { RootOptions } from './core/types.js'
 export interface ModuleOptions {
   roots?: RootOptions
+  components?: ComponentsOptions
 }
 const module: NuxtModule<ModuleOptions> = defineNuxtModule<ModuleOptions>({
   meta: { name: '@up-nuxt/features', configKey: 'feature', compatibility: { nuxt: '^4.6.4' } },
-  defaults: {},
+  defaults: { components: { autoImport: true, prefix: true } },
   async setup(options, nuxt) {
     const result = await scanProject(
       {
@@ -26,10 +29,11 @@ const module: NuxtModule<ModuleOptions> = defineNuxtModule<ModuleOptions>({
           )
           .join('\n'),
       )
+    const logger = useLogger('@up-nuxt/features')
     for (const diagnostic of result.diagnostics)
-      console.warn(`[${diagnostic.code}] ${diagnostic.message}`)
-    // Discovery only: resolvers and runtime manifests will consume this registry in Milestone 2.
-    console.info(`@up-nuxt/features: discovered ${result.registry.features.length} features`)
+      logger.warn(`[${diagnostic.code}] ${diagnostic.message}`)
+    await registerFeatureComponents(result.registry, options.components ?? {}, nuxt)
+    logger.debug(`Discovered ${result.registry.features.length} features`)
   },
 })
 

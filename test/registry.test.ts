@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { buildRegistry } from '../src/core/registry.js'
-import type { FeatureDeclaration, RegistryBuildResult, RootKind } from '../src/core/types.js'
+import type {
+  FeatureDeclaration,
+  RegistryBuildResult,
+  RootKind,
+  RuntimeLayout,
+} from '../src/core/types.js'
 
 function declaration(id: string, rootKind: RootKind = 'general', root = `/project/${rootKind}`) {
   const segments = id.split('/')
@@ -11,10 +16,21 @@ function declaration(id: string, rootKind: RootKind = 'general', root = `/projec
     kind: 'feature' as const,
     origin: 'feature-root' as const,
     source: {
-      root: { kind: rootKind, path: root },
+      featureId: id,
+      root: { kind: rootKind, path: root, discovery: 'feature-container' as const },
       path: `${root}/${id}`,
-      resources: [
-        { name: 'components', path: `${root}/${id}/components`, boundary: 'app' as const },
+      layout: (rootKind === 'general' ? 'full-stack' : rootKind) as RuntimeLayout,
+      scopes: [
+        {
+          kind: rootKind === 'server' ? ('server' as const) : ('app' as const),
+          path: `${root}/${id}${rootKind === 'general' ? '/app' : ''}`,
+          resources: [
+            {
+              name: rootKind === 'server' ? 'api' : 'components',
+              path: `${root}/${id}${rootKind === 'general' ? '/app' : ''}/${rootKind === 'server' ? 'api' : 'components'}`,
+            },
+          ],
+        },
       ],
     },
   }
@@ -38,9 +54,11 @@ const native = (id: string, parentId?: string): FeatureDeclaration => ({
   origin: 'native-pages',
   parentId,
   source: {
-    root: { kind: 'app', path: '/project/app/pages' },
+    featureId: id,
+    root: { kind: 'app', path: '/project/app/pages', discovery: 'native-pages' },
     path: `/project/app/pages/${id.slice(7)}`,
-    resources: [],
+    layout: 'app',
+    scopes: [],
   },
 })
 
@@ -56,7 +74,7 @@ describe('validated registry results', () => {
     const input = [declaration('shop', 'server'), declaration('shop'), declaration('shop', 'app')]
     const entry = registry(buildRegistry(input)).features[0]!
     expect(entry.sources.map((source) => source.root.kind)).toEqual(['app', 'general', 'server'])
-    expect(entry.sources.flatMap((source) => source.resources)).toHaveLength(3)
+    expect(entry.sources.flatMap((source) => source.scopes[0]!.resources)).toHaveLength(3)
     expect(buildRegistry(input)).toEqual(buildRegistry([...input].reverse()))
   })
   it('retains both conflict paths when kinds conflict', () => {
@@ -151,12 +169,12 @@ describe('validated registry results', () => {
     const input = declaration('shop')
     const snapshot = registry(buildRegistry([input]))
     input.source.root.path = '/changed'
-    input.source.resources[0]!.path = '/changed'
-    input.source.resources.push({ name: 'pages', path: '/new', boundary: 'app' })
+    input.source.scopes[0]!.resources[0]!.path = '/changed'
+    input.source.scopes[0]!.resources.push({ name: 'pages', path: '/new' })
     expect(snapshot.features[0]!.sources[0]!.root.path).toBe('/project/general')
-    expect(snapshot.features[0]!.sources[0]!.resources).toHaveLength(1)
-    expect(snapshot.features[0]!.sources[0]!.resources[0]!.path).toBe(
-      '/project/general/shop/components',
+    expect(snapshot.features[0]!.sources[0]!.scopes[0]!.resources).toHaveLength(1)
+    expect(snapshot.features[0]!.sources[0]!.scopes[0]!.resources[0]!.path).toBe(
+      '/project/general/shop/app/components',
     )
   })
   it('freezes every exposed snapshot container and record at runtime', () => {
@@ -174,12 +192,14 @@ describe('validated registry results', () => {
       feature.children,
       source,
       source.root,
-      source.resources,
-      source.resources[0]!,
+      source.scopes,
+      source.scopes[0]!,
+      source.scopes[0]!.resources,
+      source.scopes[0]!.resources[0]!,
     ])
       expect(Object.isFrozen(value)).toBe(true)
     expect(Reflect.set(source.root, 'path', '/corrupted')).toBe(false)
-    expect(Reflect.set(source.resources, '0', {})).toBe(false)
+    expect(Reflect.set(source.scopes[0]!.resources, '0', {})).toBe(false)
   })
   it('warnings allow success, errors deny a registry; diagnostics are detached and frozen', () => {
     const warning = {
@@ -275,6 +295,83 @@ it('exposes read-only snapshot types', () => {
     // @ts-expect-error Source root fields are read-only.
     snapshot.features[0]!.sources[0]!.root.path = '/changed'
     // @ts-expect-error Nested resource arrays are read-only.
-    snapshot.features[0]!.sources[0]!.resources.pop()
+    snapshot.features[0]!.sources[0]!.scopes[0]!.resources.pop()
   }
+})
+
+it('validates source ownership and runtime scope layout independently from logical merge identity', () => {
+  const item = declaration('shop')
+  failure([{ ...item, source: { ...item.source, featureId: 'other' } }], 'INVALID_ID')
+  failure([{ ...item, source: { ...item.source, layout: 'app' } }], 'INVALID_SCOPE')
+  const app = declaration('shop', 'app')
+  failure(
+    [
+      {
+        ...app,
+        source: {
+          ...app.source,
+          scopes: [{ kind: 'server', path: app.source.path, resources: [] }],
+        },
+      },
+    ],
+    'INVALID_SCOPE',
+  )
+})
+it('copies scope paths, kinds and resource lists without retaining mutable input records', () => {
+  const input = declaration('shop')
+  const snapshot = registry(buildRegistry([input]))
+  input.source.scopes[0]!.path = '/changed'
+  input.source.scopes[0]!.kind = 'server'
+  input.source.scopes.length = 0
+  const source = snapshot.features[0]!.sources[0]!
+  expect(source.featureId).toBe('shop')
+  expect(source.scopes).toHaveLength(1)
+  expect(source.scopes[0]!.kind).toBe('app')
+  expect(source.scopes[0]!.path).toBe('/project/general/shop/app')
+  expect(Reflect.set(source.scopes[0]!, 'kind', 'server')).toBe(false)
+})
+
+it('rejects declarations outside their claimed root even when scopes match the source', () => {
+  const item = declaration('shop', 'app', '/repo/app/features')
+  for (const path of [
+    '/repo/server/features/shop',
+    '/repo/app/features-other/shop',
+    item.source.root.path,
+  ]) {
+    failure(
+      [
+        {
+          ...item,
+          source: {
+            ...item.source,
+            path,
+            scopes: [
+              {
+                kind: 'app',
+                path,
+                resources: [{ name: 'components', path: path + '/components' }],
+              },
+            ],
+          },
+        },
+      ],
+      'INVALID_SOURCE_OWNERSHIP',
+    )
+  }
+})
+
+it('validates native page-group ownership against the relative page hierarchy', () => {
+  const item = native('@pages/admin/(dashboard)')
+  registry(buildRegistry([item]))
+  for (const path of ['/project/other/admin/(dashboard)', '/project/app/pages/(dashboard)'])
+    failure([{ ...item, source: { ...item.source, path } }], 'INVALID_SOURCE_OWNERSHIP')
+  failure(
+    [
+      {
+        ...item,
+        source: { ...item.source, root: { ...item.source.root, discovery: 'feature-container' } },
+      },
+    ],
+    'INVALID_SOURCE_OWNERSHIP',
+  )
 })

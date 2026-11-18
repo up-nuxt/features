@@ -1,5 +1,5 @@
-import { relative, sep } from 'node:path'
-import { compare, featureName } from './conventions.js'
+import { basename, isAbsolute, join, relative, sep } from 'node:path'
+import { appResources, compare, featureName, serverResources } from './conventions.js'
 import type {
   Diagnostic,
   FeatureDeclaration,
@@ -11,6 +11,7 @@ import type {
 const sourceKey = (source: FeatureSource): string =>
   JSON.stringify([
     source.root.kind,
+    source.root.discovery,
     source.root.layer ?? '',
     relative(source.root.path, source.path).split(sep).join('/'),
   ])
@@ -21,13 +22,22 @@ function copySource(source: FeatureSource): FeatureSource {
   return Object.freeze({
     root: Object.freeze({ ...source.root }),
     path: source.path,
-    resources: Object.freeze(
-      source.resources
-        .map((resource) => Object.freeze({ ...resource }))
-        .sort(
-          (a, b) =>
-            compare(a.boundary, b.boundary) || compare(a.name, b.name) || compare(a.path, b.path),
-        ),
+    featureId: source.featureId,
+    layout: source.layout,
+    scopes: Object.freeze(
+      source.scopes
+        .map((scope) =>
+          Object.freeze({
+            kind: scope.kind,
+            path: scope.path,
+            resources: Object.freeze(
+              scope.resources
+                .map((resource) => Object.freeze({ ...resource }))
+                .sort((a, b) => compare(a.name, b.name) || compare(a.path, b.path)),
+            ),
+          }),
+        )
+        .sort((a, b) => compare(a.kind, b.kind) || compare(a.path, b.path)),
     ),
   })
 }
@@ -51,6 +61,33 @@ function validIdentity(item: FeatureDeclaration): boolean {
     /^\([^()]+\)$/.test(last) &&
     item.name === last.slice(1, -1)
   )
+}
+
+/** Validate the canonical paths supplied by discovery without consulting the filesystem. */
+function belongsToRoot(item: FeatureDeclaration): boolean {
+  const { root, path } = item.source
+  if (!isAbsolute(root.path) || !isAbsolute(path)) return false
+  const fromRoot = relative(root.path, path)
+  if (isAbsolute(fromRoot) || fromRoot === '..' || fromRoot.startsWith(`..${sep}`)) return false
+
+  switch (root.discovery) {
+    case 'feature-container':
+      return item.origin === 'feature-root' && fromRoot !== ''
+    case 'project-group': {
+      if (item.origin !== 'feature-root' || root.kind !== 'general') return false
+      const [group] = item.id.split('/')
+      if (basename(root.path) !== `(${group})`) return false
+      return item.parentId === undefined
+        ? fromRoot === '' && item.kind === 'group'
+        : fromRoot !== ''
+    }
+    case 'native-pages':
+      return (
+        item.origin === 'native-pages' &&
+        root.kind === 'app' &&
+        fromRoot.split(sep).join('/') === item.id.slice('@pages/'.length)
+      )
+  }
 }
 
 export function buildRegistry(
@@ -88,6 +125,55 @@ export function buildRegistry(
         `Invalid identity or name for ${item.id}. Module names must use lowercase kebab-case; native groups use the @pages/ namespace.`,
         [item],
       )
+    const source = item.source
+    if (source.featureId !== item.id)
+      report(
+        'INVALID_ID',
+        `Source owner ${source.featureId} does not match declaration ${item.id}.`,
+        [item],
+      )
+    if (!belongsToRoot(item))
+      report(
+        'INVALID_SOURCE_OWNERSHIP',
+        `Declaration ${item.id} at ${source.path} does not belong to its ${source.root.discovery} root ${source.root.path}.`,
+        [item],
+      )
+    const expectedLayout = source.root.kind === 'general' ? 'full-stack' : source.root.kind
+    if (source.layout !== expectedLayout)
+      report(
+        'INVALID_SCOPE',
+        `Source layout ${source.layout} does not match ${source.root.kind} root for ${item.id}.`,
+        [item],
+      )
+    const kinds = new Set<string>()
+    for (const scope of source.scopes) {
+      if (scope.kind === 'shared') {
+        report('UNSUPPORTED_SCOPE', `Shared feature scopes are not supported for ${item.id}.`, [
+          item,
+        ])
+        continue
+      }
+      const expectedPath =
+        source.layout === 'full-stack' ? join(source.path, scope.kind) : source.path
+      if (
+        kinds.has(scope.kind) ||
+        relative(expectedPath, scope.path) !== '' ||
+        (source.layout !== 'full-stack' && scope.kind !== source.layout)
+      )
+        report('INVALID_SCOPE', `Invalid or duplicate ${scope.kind} scope for ${item.id}.`, [item])
+      kinds.add(scope.kind)
+      const allowed = scope.kind === 'app' ? appResources : serverResources
+      for (const resource of scope.resources)
+        if (
+          !allowed.some((name) => name === resource.name) ||
+          relative(scope.path, resource.path) !== resource.name
+        )
+          report(
+            'INVALID_RESOURCE_LOCATION',
+            `Resource ${resource.name} is outside its declared ${scope.kind} scope for ${item.id}.`,
+            [item],
+          )
+    }
     const items = groups.get(item.id) ?? []
     items.push(item)
     groups.set(item.id, items)
