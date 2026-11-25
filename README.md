@@ -2,7 +2,7 @@
 
 Feature organization for Nuxt. Repository: [up-nuxt/features](https://github.com/up-nuxt/features).
 
-The module supports explicit application/server resource scopes, Nuxt component auto-imports, opt-in feature composable imports, and opt-in Feature Pages. Feature Nitro resources are opt-in. OpenFeature is future work.
+The module supports explicit application/server resource scopes, Nuxt component auto-imports, opt-in feature composable imports, and opt-in Feature Pages. Feature Nitro resources and server-side OpenFeature availability are opt-in.
 
 ## Directory conventions
 
@@ -132,6 +132,82 @@ Only Server scopes contribute Nitro resources. Feature registration currently su
 Server middleware is global. Nitro plugins run at Nitro startup, including when the development worker restarts. Neither receives a URL prefix. Import Feature `utils/` and `types/` explicitly within server code. They receive no registration or global auto-imports. Native server discovery and Layer precedence continue to apply to native resources.
 
 Restart Nuxt after adding, removing or renaming Feature resource files or changing routing options. The build checks symlinks and protects registered entry points on reload. An unsafe replacement is unavailable until a valid entry is restored and the server is restarted. See the [architecture](docs/architecture.md#nitro-server-resources) for collision, ordering and security details.
+
+## Server-side feature availability
+
+Enable `feature.flags.enabled` to bind Features and Groups to OpenFeature boolean flags. Projects using an OpenFeature provider can install the optional peer with `pnpm add @openfeature/server-sdk@^1.23.0`. The SDK declares its own `@openfeature/core` peer. The base module works with flags disabled in projects without the SDK.
+
+```ts
+export default defineNuxtConfig({
+  modules: ['@up-nuxt/features'],
+  feature: {
+    flags: {
+      enabled: true,
+      serverClient: './server/feature-client.ts',
+      bindings: {
+        shop: { key: 'features.shop.enabled' },
+        'shop/checkout': { key: 'features.shop.checkout', defaultValue: false },
+        '@pages/(dashboard)': { key: 'ui.dashboard', defaultValue: true },
+      },
+    },
+  },
+})
+```
+
+Each key in `bindings` is a canonical declaration ID. Structural Features and Groups use IDs such as `shop` and `shop/checkout`. A native project Group uses `@pages/(dashboard)` while a Group in Feature Pages uses `@pages:feature/shop/(dashboard)`. Paths relative to the Pages root are kept in native Group IDs, and a nested Feature owner is URI-encoded. Native Group bindings require a Group present in the finalized Pages membership. The flag key is the exact OpenFeature key. Unknown IDs, empty keys, keys with surrounding whitespace or control characters, and non-boolean defaults stop the build.
+
+The path in `serverClient` resolves from the project root or a Nuxt alias and loads only in Nitro. Default-export a ready OpenFeature client or a zero-argument synchronous or asynchronous factory returning one. The application owns provider registration, readiness, replacement and disposal. A factory can await a provider on an application-owned domain:
+
+```ts
+// server/feature-client.ts
+import { TypedInMemoryProvider, OpenFeature } from '@openfeature/server-sdk'
+import type { AvailabilityEvent, FeatureFlagClientFactory } from '@up-nuxt/features/server'
+
+export default (async () => {
+  await OpenFeature.setProviderAndWait('storefront', new TypedInMemoryProvider({
+    'features.shop.enabled': {
+      variants: { on: true, off: false },
+      defaultVariant: 'on',
+      disabled: false,
+    },
+  }))
+  return OpenFeature.getClient('storefront')
+}) satisfies FeatureFlagClientFactory
+
+export function getEvaluationContext(event: AvailabilityEvent) {
+  const account = event.context.accountId
+  return typeof account === 'string' ? { targetingKey: account } : {}
+}
+```
+
+In native and Feature-owned Nitro handlers, import `isFeatureEnabled` or `isGroupEnabled` from `@up-nuxt/features/server` and pass the H3 event explicitly.
+
+```ts
+import { isFeatureEnabled } from '@up-nuxt/features/server'
+
+export default defineEventHandler(async (event) => {
+  const available = await isFeatureEnabled(event, 'shop', { context: { surface: 'cart' } })
+  return { available }
+})
+```
+
+In Nuxt SSR, pass `useRequestEvent()` from a server-only execution path. In a universal component, put a dynamic import of `@up-nuxt/features/server` inside an `if (import.meta.server)` block and render an explicitly selected result. The package supplies server availability decisions for application logic. Existing pages and endpoints remain registered and the application handles authorization independently.
+
+Availability requires every bound ancestor and the subject's binding to evaluate true. A qualified native Group includes its Feature owner's structural ancestry and its own native Group ancestry. Each binding defaults to false unless configured otherwise. An unbound declaration adds no restriction. Missing clients, flags, unavailable providers, evaluation failures and a client factory that fails to complete within five seconds use the corresponding binding defaults. The factory runs once per Nitro boot. The optional `getEvaluationContext(event)` export reads the current request, and trusted helper options override matching keys before the merged object is passed to OpenFeature as invocation context. Each helper call evaluates the applicable bindings against the current SDK context and provider state. The module keeps the evaluator on the request and retains no evaluation results between calls. OpenFeature providers may cache flag data under their own policies. See the [architecture notes](docs/architecture.md#server-side-feature-availability) for lifecycle and scope.
+
+### Personalized availability and caching
+
+Avoid shared caching of personalized decisions and of any response that includes them. A hit in a Nitro `defineCachedEventHandler` or a cached function can skip the helper entirely. In this example, a shared response cache can serve the first user's decision to later users.
+
+```ts
+export default defineCachedEventHandler(async (event) => ({
+  enabled: await isFeatureEnabled(event, 'shop'),
+}))
+```
+
+The same risk applies to SWR and supported ISR route rules, shared CDN and reverse-proxy caches, and personalized SSR HTML and Nuxt payloads. If you cache a personalized result, the cache key must cover every targeting dimension and the freshness policy must account for provider changes. User-targeted decisions require request-time server evaluation. Static prerendering produces one shared result without fresh per-user decisions.
+
+Availability controls rollout. Apply authorization independently when serving sensitive data or performing protected actions, even if the client already displays an enabled decision.
 
 ## Development
 
