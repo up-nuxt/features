@@ -34,7 +34,7 @@ features/shop/
 
 For app-only features, put resources directly under `app/features/<name>/`. For server-only features, use `server/features/<name>/`. Full-stack features use `features/<name>/app/` and `features/<name>/server/`. Nested features and groups sit next to those scopes. Feature names prefix routes by default. Parenthesized groups such as `features/shop/(checkout)/` organize related resources without adding a URL segment by default. Restart Nuxt after adding, moving, or removing feature resources.
 
-Requires Nuxt 4.6.4 or later in the 4.x series and Node 24 or 26. Feature server integration is tested with Nitro 2.13.6. See the [architecture guide](https://github.com/up-nuxt/features/blob/main/docs/architecture.md) for routing options, naming rules, and discovery boundaries.
+Requires Nuxt 4.6.4 or later in the 4.x series and Node 24 or 26. With Nuxt 4.7.0, use Node 24.15 or later in the 24.x series, or Node 26. Feature server registration supports Nitro 2.13.6 and 2.14.0. The current tests use Nuxt 4.7.0 and Nitro 2.14.0. See the [architecture guide](https://github.com/up-nuxt/features/blob/main/docs/architecture.md) for routing options, naming rules, and discovery boundaries.
 
 ## Experimental OpenFeature integration
 

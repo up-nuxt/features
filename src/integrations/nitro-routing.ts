@@ -18,11 +18,11 @@ interface NitroPathTools {
 
 export const nitroFilePattern = '**/*.{js,mjs,cjs,ts,mts,cts,tsx,jsx}'
 
-const supportedNitro = '2.13.6'
+const supportedNitro = ['2.13.6', '2.14.0']
 
 function compatibilityError(details: string, cause?: unknown) {
   return new Error(
-    `[FEATURE_SERVER_NITRO_VERSION] ${details}. Supported Nitro version: ${supportedNitro}. Use a Nuxt installation with that Nitro version or disable feature.server.enabled.`,
+    `[FEATURE_SERVER_NITRO_VERSION] ${details}. Supported Nitro versions: ${supportedNitro.join(', ')}. Use a Nuxt installation with a supported Nitro version or disable feature.server.enabled.`,
     { cause },
   )
 }
@@ -44,7 +44,7 @@ export async function resolveSupportedNitro(dependencyOwner: string | URL) {
   // Nitro 2.13.6 ships an embedded meta.version of 2.13.5; trust the package manifest.
   if (typeof version !== 'string' || !version)
     throw compatibilityError('Nitro package metadata is missing a version')
-  if (version !== supportedNitro) throw compatibilityError(`detected Nitro ${version}`)
+  if (!supportedNitro.includes(version)) throw compatibilityError(`detected Nitro ${version}`)
   return createRequire(manifest)
 }
 
@@ -88,7 +88,7 @@ export async function loadNitroScannerTools(nuxt: Nuxt) {
   return { globby, paths }
 }
 
-/** A file-to-record adapter for Nitro 2.13.6 scanServerRoutes. Nitro still owns matching. */
+/** A file-to-record adapter for the supported Nitro v2 scanners. Nitro still owns matching. */
 export function nitroRouteFromFile(
   file: string,
   apiBase: string,

@@ -1,6 +1,6 @@
 {
   "name": "@up-nuxt/features",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Feature discovery and organization for Nuxt.",
   "homepage": "https://github.com/up-nuxt/features#readme",
   "bugs": {
@@ -41,7 +41,7 @@
     "check:playground": "nuxt build playground"
   },
   "dependencies": {
-    "@nuxt/kit": "4.6.4"
+    "@nuxt/kit": "4.7.0"
   },
   "peerDependencies": {
     "@openfeature/server-sdk": "^1.23.0"
@@ -51,10 +51,10 @@
   },
   "devDependencies": {
     "@nuxt/module-builder": "1.0.4",
-    "@nuxt/schema": "4.6.4",
+    "@nuxt/schema": "4.7.0",
     "@openfeature/server-sdk": "1.23.0",
     "@types/node": "^24.19.2",
-    "nuxt": "4.6.4",
+    "nuxt": "4.7.0",
     "typescript": "6.0.3",
     "vitest": "5.1.0"
   },

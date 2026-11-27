@@ -213,6 +213,57 @@ export async function registerFeatureComposables(
       lastSafeExternalImports = []
       lastFeatureFiles.clear()
     })
+
+    async function revokeFeatureImports() {
+      // Nuxt can mutate the dynamic list before validation. Publish only the
+      // last validated external imports and invalidate previously served files.
+      if (nuxt.options.dev) {
+        revokedFiles = lastFeatureFiles
+        for (const file of revokedFiles) {
+          const target = await realpath(file).catch(() => undefined)
+          if (target && relative(file, target)) revokedTargets.add(resolve(target))
+        }
+        invalidateImports(new Set([...revokedFiles, ...revokedTargets]))
+      }
+      await context.modifyDynamicImports(() => [...lastSafeExternalImports])
+      if (nuxt.options.dev && nuxt.apps.default) {
+        try {
+          await nuxt.runWithContext(() =>
+            updateTemplates({
+              filter: (template) =>
+                /(?:^|\/)(?:shared-)?imports\.(?:d\.ts|mjs)$/.test(template.filename),
+            }),
+          )
+        } catch (templateError) {
+          useLogger('@up-nuxt/features').debug('Failed to regenerate revoked imports', templateError)
+        }
+      }
+    }
+
+    if (nuxt.options.dev) {
+      nuxt.hook('builder:watch', async (_, path) => {
+        const file = resolve(nuxt.options.srcDir, path)
+        if (
+          !lastFeatureFiles.has(file) &&
+          !directories.some((dir) => contains(dir, file) || contains(file, dir))
+        ) return
+        // Nuxt 4.7 can skip imports:extend when the event's target has an older
+        // mtime than the last import scan. Check its filesystem identity anyway.
+        try {
+          await checkTrees(true)
+          if (lastFeatureFiles.has(file)) {
+            const actual = await realpath(file).catch((error: NodeJS.ErrnoException) => {
+              if (error.code !== 'ENOENT') throw error
+            })
+            if (actual && relative(file, actual)) throw symlinkError(file, 'composable')
+          }
+        } catch (error) {
+          await revokeFeatureImports()
+          throw error
+        }
+      })
+    }
+
     nuxt.hook('imports:extend', async (imports) => {
       try {
         await checkTrees(true)
@@ -240,34 +291,7 @@ export async function registerFeatureComposables(
         }
         lastFeatureFiles = featureFiles
       } catch (error) {
-        // Nuxt mutates the dynamic list before validation, and Unimport does
-        // not invalidate it if the outer callback rejects. Restore only the
-        // last validated external imports and explicitly publish that change.
-        if (nuxt.options.dev) {
-          revokedFiles = lastFeatureFiles
-          for (const file of revokedFiles) {
-            const target = await realpath(file).catch(() => undefined)
-            if (target && relative(file, target)) revokedTargets.add(resolve(target))
-          }
-          const affected = new Set([...revokedFiles, ...revokedTargets])
-          invalidateImports(affected)
-        }
-        await context.modifyDynamicImports(() => [...lastSafeExternalImports])
-        if (nuxt.options.dev && nuxt.apps.default) {
-          try {
-            await nuxt.runWithContext(() =>
-              updateTemplates({
-                filter: (template) =>
-                  /(?:^|\/)(?:shared-)?imports\.(?:d\.ts|mjs)$/.test(template.filename),
-              }),
-            )
-          } catch (templateError) {
-            useLogger('@up-nuxt/features').debug(
-              'Failed to regenerate revoked imports',
-              templateError,
-            )
-          }
-        }
+        await revokeFeatureImports()
         throw error
       }
     })

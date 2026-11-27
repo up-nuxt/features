@@ -13,7 +13,7 @@ it('resolves the verified Nitro distribution from the installed Nuxt package', a
 
 it.each([
   ['3.0.0', /detected Nitro 3\.0\.0.*2\.13\.6/],
-  ['2.14.0', /detected Nitro 2\.14\.0.*2\.13\.6/],
+  ['2.15.0', /detected Nitro 2\.15\.0.*2\.13\.6.*2\.14\.0/],
   [null, /metadata.*missing.*2\.13\.6/],
   [undefined, /could not resolve.*2\.13\.6/],
 ] as const)('rejects unsupported/missing Nitro metadata (%s)', async (version, diagnostic) => {
